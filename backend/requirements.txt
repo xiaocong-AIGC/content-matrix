@@ -1,0 +1,11 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+sqlmodel>=0.0.22
+pydantic-settings>=2.4.0
+python-multipart>=0.0.9
+httpx2>=2.4.0
+pytest>=8.3.0
+# For Postgres (multi-phone / multi-worker), also install the driver and set
+# DATABASE_URL=postgresql+psycopg://user:pass@host:5432/dbname :
+#   pip install "psycopg[binary]>=3.2"
+

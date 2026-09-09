@@ -1,0 +1,51 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "图文矩阵营销平台",
+  "version": "0.1.0",
+  "identifier": "com.haohui.contentmatrix",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build:tauri"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "图文矩阵营销平台",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "externalBin": [
+      "binaries/backend",
+      "binaries/orchestrator",
+      "binaries/autoprovision"
+    ],
+    "resources": {
+      "resources/adb.exe": "platform-tools/adb.exe",
+      "resources/AdbWinApi.dll": "platform-tools/AdbWinApi.dll",
+      "resources/AdbWinUsbApi.dll": "platform-tools/AdbWinUsbApi.dll",
+      "resources/libwinpthread-1.dll": "platform-tools/libwinpthread-1.dll",
+      "resources/app-debug.apk": "platform-tools/app-debug.apk"
+    },
+    "icon": [
+      "D:/cmicons/32x32.png",
+      "D:/cmicons/128x128.png",
+      "D:/cmicons/128x128@2x.png",
+      "D:/cmicons/icon.icns",
+      "D:/cmicons/icon.ico"
+    ]
+  }
+}

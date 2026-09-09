@@ -1,0 +1,65 @@
+# ===== 密钥 / 凭据（绝对不能进版本库） =====
+.env
+*/.env
+backend/.env
+backend/storage/.admin_token
+backend/storage/.provision_key
+backend/tunnel/credentials.json
+backend/tunnel/config.yml
+**/ai_key.txt
+
+# ===== 运行时数据（每台机器不同，且体积大） =====
+backend/data/
+backend/storage/
+*.db
+*.db-wal
+*.db-shm
+
+# ===== 依赖 / 虚拟环境 =====
+backend/.venv/
+frontend/node_modules/
+__pycache__/
+*.pyc
+
+# ===== 构建产物 =====
+frontend/dist/
+frontend/dist-web/
+frontend/src-tauri/target/
+frontend/src-tauri/binaries/
+frontend/src-tauri/resources/*.apk
+android-agent/app/build/
+android-agent/build/
+android-agent/.gradle/
+android-agent/local.properties
+*.log
+
+# ===== 大二进制（工具/安装包，不该进版本库） =====
+*.apk
+*.exe
+*.dll
+*.bak
+backend/tunnel/
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# tsc 增量缓存，每次构建都变，没有任何进 VCS 的理由
+frontend/*.tsbuildinfo
+
+# 从仓库根跑后端脚本时会在这里生成令牌，不属于源码
+/storage/
+
+# ===== 调试残留（真机截图 / UI dump）=====
+# 这些是排查时随手落下的：抖音、小红书的**真实界面截图**，里面有真实账号、
+# 真实私聊内容和短链。一次都不该进版本库。
+_*.png
+_*.xml
+_*.jpg
+*.uix
+ui_dump*.xml
+
+# 内部工作日志（含真实账号与运营数字，不进公开仓库）
+docs/进度.md

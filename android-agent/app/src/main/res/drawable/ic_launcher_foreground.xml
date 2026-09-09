@@ -1,0 +1,30 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Red offset copy (the two-tone "glitch" note look) -->
+    <group android:translateX="7" android:translateY="-4">
+        <path
+            android:fillColor="#F24F3D"
+            android:pathData="M40,76 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0 z" />
+        <path
+            android:fillColor="#F24F3D"
+            android:pathData="M52,34 h6 v42 h-6 z" />
+        <path
+            android:fillColor="#F24F3D"
+            android:pathData="M58,34 c12,2 18,11 15,24 c-1,-10 -8,-15 -15,-15 z" />
+    </group>
+
+    <!-- Cyan main note -->
+    <path
+        android:fillColor="#15C8C0"
+        android:pathData="M40,76 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0 z" />
+    <path
+        android:fillColor="#15C8C0"
+        android:pathData="M52,34 h6 v42 h-6 z" />
+    <path
+        android:fillColor="#15C8C0"
+        android:pathData="M58,34 c12,2 18,11 15,24 c-1,-10 -8,-15 -15,-15 z" />
+</vector>

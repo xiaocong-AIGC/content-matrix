@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">抖音发布 Agent</string>
+    <string name="accessibility_service_label">抖音发布 Agent 无障碍服务</string>
+    <string name="accessibility_description">识别并操作真实抖音 App，执行已授权的发布任务。</string>
+</resources>
