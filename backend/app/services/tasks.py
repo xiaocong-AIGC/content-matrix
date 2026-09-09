@@ -786,11 +786,14 @@ def fail_stalled_tasks(session: Session) -> int:
             continue
         stalled_min = int((now - marker).total_seconds() // 60)
         device_id = task.device_id
+        # ⚠ 先把"卡在哪一步"读出来再改 current_step —— 顺序反了的话，
+        # 这条消息里唯一有用的信息（卡在哪）会被自己刚赋的 "stalled" 覆盖掉。
+        # 最后一条日志的 step 比 current_step 更准：它是 Agent 真正走到的地方。
+        where = (last_log.step if last_log and last_log.step else task.current_step) or "执行中"
         task.status = TaskStatus.FAILED
         task.current_step = "stalled"
         task.error_message = (
-            f"卡在「{task.current_step or '执行中'}」{stalled_min} 分钟没有任何动静，"
-            "已自动结束并把手机让出来"
+            f"卡在「{where}」{stalled_min} 分钟没有任何动静，已自动结束并把手机让出来"
         )
         task.finished_at = now
         task.updated_at = now

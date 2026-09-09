@@ -122,6 +122,8 @@ def test_卡在running的任务要被收掉():
                 assert dead.status == TaskStatus.FAILED
                 assert "没有任何动静" in (dead.error_message or "")
                 assert "32 分钟" in (dead.error_message or "")
+                # 必须说清卡在哪一步 —— 那是这条消息唯一有用的信息
+                assert "publishing" in (dead.error_message or ""), dead.error_message
                 # 手机必须被让出来，否则整条队列（含群发）继续堵着
                 d = s2.get(Device, dev_id)
                 assert d.current_task_id is None and d.status == DeviceStatus.ONLINE
