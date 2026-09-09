@@ -460,6 +460,28 @@ class TaskCoordinator(
                 "标题写入=$titleFilled，正文/话题写入=$captionFilled，请人工核对后点「发布」",
             )
         } else {
+            // ⚠ **写入失败就不能发**。`captionFilled` 以前只拿来拼一句人工确认
+            // 的提示文案，自动发布这条路上算完就扔了 —— 于是正文没写进去时，
+            // 我们照样去点发布，把一条空内容发到真实账号上。
+            //
+            // `fillBodyField` 只有两种情况返回 false：找不到可编辑控件，
+            // 或者 setText 被拒。正文本身是空的它返回 true，所以这里为 false
+            // 一定是真的没写进去。发出去比失败严重得多 —— 失败会自动改期重发，
+            // 空内容发出去只能人工去删。
+            if (!captionFilled) {
+                reporter.screenshot("caption_empty")
+                reporter.status(
+                    "failed", "caption_empty", 0,
+                    "正文没能写进编辑框，已停在发布前，不会发出空内容",
+                )
+                state.moveTo(ExecutionStep.FAILED)
+                return
+            }
+            // 标题不同：抖音图文的标题栏在有些版本上本来就不出现，写不进去不代表
+            // 内容有问题，所以只记一条日志，不拦。
+            if (!titleFilled && task.publishTitle.isNotBlank()) {
+                reporter.log("warning", "publishing", "标题没能写进去，正文正常，继续发布")
+            }
             reporter.status("running", "publishing", 98, "内容已就绪，自动点击发布")
             // ⚠ **必须看返回值**。这一下以前是
             //     `clickAnyText(...) || tapByText(...)`

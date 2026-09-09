@@ -1166,31 +1166,52 @@ class AgentForegroundService :
         message: String,
     ) {
         val task = currentTask ?: return
+        val terminal = status in setOf("succeeded", "failed", "cancelled")
         executor.execute {
-            try {
-                api.updateStatus(
-                    task = task,
-                    deviceId = preferences.deviceId,
-                    status = status,
-                    step = step,
-                    progress = progress,
-                    message = message,
-                    errorMessage = if (status == "failed") message else null,
-                )
+            // ⚠ 终态**必须重试**。一次网络抖动就把「这条任务结束了」这个消息
+            // 弄丢，代价不是丢一条日志：后端那边任务一直是 running，这台手机
+            // 一直被占着，而下面清 currentTask / 回主界面的收尾也全都不会执行 ——
+            // 整台机器就此停摆，直到有人去看。
+            // 中间态丢了无所谓（下一条状态会盖过来），所以只给终态加重试。
+            val attempts = if (terminal) 4 else 1
+            var reported = false
+            var lastError: Throwable? = null
+            for (attempt in 1..attempts) {
+                try {
+                    api.updateStatus(
+                        task = task,
+                        deviceId = preferences.deviceId,
+                        status = status,
+                        step = step,
+                        progress = progress,
+                        message = message,
+                        errorMessage = if (status == "failed") message else null,
+                    )
+                    reported = true
+                    break
+                } catch (error: Throwable) {
+                    lastError = error
+                    if (attempt < attempts) Thread.sleep(1500L * attempt)
+                }
+            }
+            if (reported) {
                 updateLocalStatus(message)
                 if (status == "succeeded") reportedAnomaly = null
-                if (status in setOf("succeeded", "failed", "cancelled")) {
-                    currentTask = null
-                    coordinator = null
-                    com.example.douyinagent.accessibility.Selectors.usePlatform("douyin")
-                    // Leave Douyin and return to our own screen to idle. Signal
-                    // the PC orchestrator to do it via adb (reliable on MIUI),
-                    // and also try ourselves as a fallback.
-                    signalSwitch("home")
-                    returnToForeground()
-                }
-            } catch (error: Throwable) {
-                updateLocalStatus("状态回传失败：${error.message}")
+            } else {
+                updateLocalStatus("状态回传失败：${lastError?.message}")
+            }
+            // ⚠ 收尾**不看回传成不成功**。回传失败时把手机也一起卡住，是拿一个
+            // 网络问题换一台设备下线 —— 严格更糟。后端那边有 10 分钟卡死收口
+            // 兜着，任务不会永远挂着；但这台手机必须现在就放出来接下一条。
+            if (terminal) {
+                currentTask = null
+                coordinator = null
+                com.example.douyinagent.accessibility.Selectors.usePlatform("douyin")
+                // Leave Douyin and return to our own screen to idle. Signal
+                // the PC orchestrator to do it via adb (reliable on MIUI),
+                // and also try ourselves as a fallback.
+                signalSwitch("home")
+                returnToForeground()
             }
         }
     }
