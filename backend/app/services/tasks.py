@@ -746,7 +746,23 @@ def reclaim_expired_tasks(session: Session) -> int:
 STALLED_AFTER = timedelta(minutes=10)
 # 这些日志只说明"Agent 还活着"，不说明"任务在往前走"。判卡死时必须排除，
 # 否则一台无障碍反复重连的手机可以让卡死的任务无限续命。
-_NON_PROGRESS_STEPS = ("accessibility_ready", "accessibility_stopped")
+# 这两条是 info 级的，级别过滤盖不到，只能点名。
+_NON_PROGRESS_STEPS = (
+    "accessibility_ready",
+    "accessibility_stopped",
+)
+# ⚠ **debug 日志一律不算进展**。
+#
+# 这条规则是被同一个坑绊了两次之后才立的：先是 `page_recognition`（每 4 秒
+# 一条），加进黑名单；接着排查声明面板时加的 `verifying` 插桩（每 3 秒一条）
+# 又把它顶开了 —— 实测任务 #1667 在发布确认页卡了 7 分半，期间写了 40 条
+# verifying、7 条 page_recognition，卡死判据一次都没触发。
+#
+# 黑名单是错的解法：每加一处调试日志就得记得回来补一行，忘了就静默失效，
+# 而且失效的正好是最难查的那种卡死。反过来才对 —— **进展的定义是"写了一条
+# 值得运营看的日志"**，那就是 info 及以上。debug 是给我们自己看的，
+# 不构成任务在往前走的证据。以后随便加插桩，不用再想着回来改这里。
+_NON_PROGRESS_LEVELS = ("debug",)
 
 
 def fail_stalled_tasks(session: Session) -> int:
@@ -774,7 +790,8 @@ def fail_stalled_tasks(session: Session) -> int:
     ).all()
     failed = 0
     for task in tasks:
-        # ⚠ 无障碍连接/断开的日志**不算进展**。它们和任务走到哪一步无关，
+        # ⚠ 无障碍连接/断开、以及**所有 debug 日志**都不算进展。它们和任务走到
+        # 哪一步无关，
         # 而这类事件在有些手机上每隔几分钟就来一次 —— 拿它们当"还活着"的证据，
         # 卡死的任务就永远判不出来（实测：任务停在发布页 12 分钟没动，
         # 却因为一条「无障碍服务已连接」把计时器重置了）。
@@ -782,6 +799,7 @@ def fail_stalled_tasks(session: Session) -> int:
             select(ExecutionLog)
             .where(ExecutionLog.task_id == task.id)
             .where(ExecutionLog.step.notin_(_NON_PROGRESS_STEPS))
+            .where(ExecutionLog.level.notin_(_NON_PROGRESS_LEVELS))
             .order_by(ExecutionLog.created_at.desc())
         ).first()
         # 没有日志的用 started_at 兜底；两个都没有就跳过（还没真正开始）
