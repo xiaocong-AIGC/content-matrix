@@ -6,6 +6,7 @@
 - 未到点的排期被算成"正在进行" → 排一条明天的就掐死今天的自动发布
 """
 
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session
@@ -14,6 +15,7 @@ from app.core.enums import ContentStatus, DeviceStatus, TaskStatus
 from app.db.session import create_db_and_tables, engine
 from app.models.entities import ContentItem, Device, DeviceAccount, PublishTask
 from app.services.tasks import (
+    claim_next_task,
     fail_stuck_confirmations,
     maybe_generate_auto_task,
     reclaim_expired_tasks,
@@ -339,3 +341,75 @@ def test_失败之后要退避_否则坏手机会吃光并发名额():
         assert _failure_backoff(session, account, now) is False, (
             "有过一次成功之后，连续失败应该从头数"
         )
+
+
+def test_无障碍没绑上的手机不发任务():
+    """无障碍是这台手机做任何事的前提 —— 没连上就读不到屏幕，
+    任务领走也只能失败。
+
+    而失败是有代价的：终态失败消耗当天的重试额度（FAIL_GIVE_UP=4），
+    连挂四次这个号今天就不再尝试了。一台无障碍掉了的手机会在几分钟内
+    把自己当天的产能烧光，等它恢复时已经没有额度了。
+
+    只认明确的 False —— None 是「还没上报过」（老版本 Agent / 刚注册），
+    不能因为"不知道"就把整台设备停掉。
+    """
+    create_db_and_tables()
+    with Session(engine) as session:
+        device = Device(
+            device_code=f"a11y-claim-{uuid.uuid4().hex[:8]}",
+            name="无障碍测试机",
+            status=DeviceStatus.ONLINE,
+            last_heartbeat_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        session.add(device)
+        session.commit()
+        session.refresh(device)
+        task = PublishTask(
+            name="等着被领的任务", platform="douyin", publish_type="text",
+            target_device_id=device.id, status=TaskStatus.QUEUED,
+        )
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+        dev_id, task_id = device.id, task.id
+
+        try:
+            # ① 无障碍没绑上 → 一条都不发，任务留在队列里
+            device.accessibility_ok = False
+            session.add(device)
+            session.commit()
+            assert claim_next_task(session, dev_id) is None
+            assert session.get(PublishTask, task_id).status == TaskStatus.QUEUED
+
+            # ② 还没上报过（None）→ 按老行为放行，不能因为"不知道"就停掉整台设备
+            device.accessibility_ok = None
+            session.add(device)
+            session.commit()
+            got = claim_next_task(session, dev_id)
+            assert got is not None and got.id == task_id
+
+            # 放回队列，再验恢复后能领
+            got.status = TaskStatus.QUEUED
+            got.device_id = None
+            got.lease_token = None
+            got.lease_expires_at = None
+            device.status = DeviceStatus.ONLINE
+            device.current_task_id = None
+            device.accessibility_ok = True
+            session.add(got)
+            session.add(device)
+            session.commit()
+
+            # ③ 恢复之后照常领
+            again = claim_next_task(session, dev_id)
+            assert again is not None and again.id == task_id
+        finally:
+            with Session(engine) as s2:
+                t = s2.get(PublishTask, task_id)
+                if t:
+                    s2.delete(t)
+                d = s2.get(Device, dev_id)
+                if d:
+                    s2.delete(d)
+                s2.commit()

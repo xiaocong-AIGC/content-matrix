@@ -803,6 +803,22 @@ def claim_next_task(session: Session, device_id: int) -> PublishTask | None:
     if not device:
         raise HTTPException(status_code=404, detail="设备不存在")
 
+    # ⚠ 无障碍没绑上的手机**不发任务**。它是这台手机做任何事的前提 ——
+    # 服务没连上就读不到屏幕，任务领走也只能失败。
+    #
+    # 而失败是有代价的：终态失败会消耗当天的重试额度（FAIL_GIVE_UP=4），
+    # 连挂四次这个号今天就不再尝试了。也就是说，一台无障碍掉了的手机会在
+    # 几分钟内把自己当天的产能烧光 —— 等无障碍恢复时已经没有额度了。
+    # 与其领走再失败，不如让任务留在队列里等它恢复。
+    #
+    # 只认**明确的 False**：None 表示这台手机还没上报过（老版本 Agent 或刚注册），
+    # 那种情况按老行为放行，不能因为"不知道"就把整台设备停掉。
+    #
+    # 任务留在队列里不会被忘掉：超过 30 分钟没被领走、而设备又在线，
+    # 「排队积压」告警会把它报出来（见 routes/alerts.py）。
+    if device.accessibility_ok is False:
+        return None
+
     reclaim_expired_tasks(session)
 
     # Concurrency: on Postgres we lock the candidate row with FOR UPDATE SKIP
