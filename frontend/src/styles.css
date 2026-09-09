@@ -171,11 +171,23 @@
   --muted-aa: var(--muted);   /* 5.27:1 on --paper / 4.77:1 on --paper-deep / 5.85:1 on --white。
                             三种底全过 AA——三份方案给的 #6b6862/#6f6c63/#6f6c61 在
                             --paper-deep（表头底色）上都只有 4.2~4.5，不达标。*/
-  --text-on-dark-1: rgba(255, 255, 255, 0.92);
-  --text-on-dark-2: rgba(255, 255, 255, 0.62); /* 深色面 12 档白透明度 ⟶ 三期收成这 3 档 */
-  --text-on-dark-3: rgba(255, 255, 255, 0.5);  /* 5.25:1 on 侧栏底。
-                                                  0.45 实测只有 4.49，卡在线下 */
-  --line-on-dark: rgba(255, 255, 255, 0.14);
+  /* 深色面上的白色叠加：三期开工时量出来 **24 档、38 处**。
+     文字 20 处散在 16 档里，其中 4 处（0.35/0.38/0.40/0.42）根本读不清；
+     线和填充 18 处散在 12 档，0.08 和 0.10 这种差别没人分得出来。
+
+     文字只留三档，底线 0.5：浏览器里实测侧栏底是 rgb(25,24,19)（比 --ink
+     略亮，上面还压着一层),0.5 得 5.27:1、0.45 只有 4.50 —— 正好压在 AA
+     线上，没有任何余量。深色卡片自己还带 0.035~0.04 的白底，一叠就掉下去。
+     所以**低于 0.5 的白色一律不许承载文字**，弱的意思是弱，不是看不清。*/
+  --text-on-dark-1: rgba(255, 255, 255, 0.92); /* 主文本 15.3:1 */
+  --text-on-dark-2: rgba(255, 255, 255, 0.62); /* 次要文本 7.4:1 */
+  --text-on-dark-3: rgba(255, 255, 255, 0.5);  /* 最弱文本 5.3:1 —— 到此为止 */
+
+  /* 线和填充不承载文字，按"看得出层次"分四档就够 */
+  --fill-on-dark: rgba(255, 255, 255, 0.04);        /* 深色卡面的提亮 */
+  --line-on-dark-soft: rgba(255, 255, 255, 0.08);   /* 最弱分隔 */
+  --line-on-dark: rgba(255, 255, 255, 0.14);        /* 默认分隔 */
+  --line-on-dark-strong: rgba(255, 255, 255, 0.22); /* 需要看清的边界 */
 
   /* ── 7. 焦点：全站 0 个 :focus-visible、5 处裸 outline:none ─────────
      用 outline 不用 box-shadow：.token-table / .content-list-card 有 overflow:hidden，
@@ -299,7 +311,7 @@ button {
   padding: 26px var(--sp-c18) 20px;
   color: #f8f4e9;
   background:
-    linear-gradient(150deg, rgba(255, 255, 255, 0.04), transparent 36%),
+    linear-gradient(150deg, var(--fill-on-dark), transparent 36%),
     #191813;
 }
 
@@ -331,7 +343,7 @@ button {
   position: relative;
   width: 43px;
   height: 43px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid var(--line-on-dark-strong);
 }
 
 .brand-signal span:first-child {
@@ -367,7 +379,7 @@ button {
 
 .brand > div:last-child span {
   margin-top: var(--sp-2);
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--text-on-dark-3);
   font-family: "Oswald", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   font-size: var(--fs-micro);
   letter-spacing: 0.16em;
@@ -376,8 +388,8 @@ button {
 .sidebar-credit {
   margin: var(--sp-c14) var(--sp-4) 26px;
   padding-top: var(--sp-c14);
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.38);
+  border-top: 1px solid var(--line-on-dark-soft);
+  color: var(--text-on-dark-3);
   font-family: "Oswald", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   font-size: var(--fs-micro);
   letter-spacing: 0.16em;
@@ -390,11 +402,11 @@ button {
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  scrollbar-color: var(--line-on-dark-strong) transparent;
 }
 .sidebar nav::-webkit-scrollbar { width: 6px; }
 .sidebar nav::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2); border-radius: 3px;
+  background: var(--line-on-dark-strong); border-radius: 3px;
 }
 
 .nav-group {
@@ -406,7 +418,7 @@ button {
   font-weight: 600;
   font-size: var(--fs-body);
   letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-on-dark-3);
 }
 
 .sidebar nav button {
@@ -421,7 +433,7 @@ button {
   padding: 0 var(--sp-c10);
   overflow: hidden;
   border: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--line-on-dark-soft);
   background: transparent;
   color: var(--text-on-dark-2);
   text-align: left;
@@ -432,7 +444,7 @@ button {
 }
 
 .sidebar nav button:last-child {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--line-on-dark-soft);
 }
 
 .sidebar nav button::before {
@@ -497,15 +509,15 @@ button {
 .agent-card {
   margin-top: auto;
   padding: var(--sp-6);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line-on-dark);
+  background: var(--fill-on-dark);
 }
 
 .agent-card-head {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: rgba(255, 255, 255, 0.42);
+  color: var(--text-on-dark-3);
   font-family: "Oswald", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   letter-spacing: 0.12em;
 }
@@ -542,7 +554,7 @@ button {
 }
 
 .agent-card-data span {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-on-dark-3);
   font-size: var(--fs-aux);
 }
 
@@ -843,7 +855,7 @@ main {
 
 .notice p {
   margin: var(--sp-2) 0 0;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-on-dark-3);
   font-size: var(--fs-aux);
   line-height: 1.5;
 }
@@ -855,7 +867,7 @@ main {
   place-items: center;
   align-self: start;
   border: 0;
-  color: rgba(255, 255, 255, 0.48);
+  color: var(--text-on-dark-3);
   background: transparent;
   cursor: pointer;
 }
@@ -919,7 +931,7 @@ main {
 }
 
 .overview-note > span {
-  color: rgba(255, 255, 255, 0.52);
+  color: var(--text-on-dark-3);
 }
 
 .overview-note strong {
@@ -1053,7 +1065,7 @@ main {
 .task-row.selected .task-kicker > span:first-child,
 .task-row.selected .task-meta,
 .task-row.selected .task-main p {
-  color: rgba(255, 255, 255, 0.48);
+  color: var(--text-on-dark-3);
 }
 
 .task-main > strong {
@@ -1411,7 +1423,7 @@ main {
 .cover-canvas svg {
   position: relative;
   z-index: 1;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-on-dark-3);
 }
 
 .shot-gallery {
@@ -1509,7 +1521,7 @@ main {
   display: grid;
   place-items: center;
   color: var(--acid);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--line-on-dark-strong);
 }
 
 .policy-ribbon span,
@@ -1518,7 +1530,7 @@ main {
 }
 
 .policy-ribbon span {
-  color: rgba(255, 255, 255, 0.48);
+  color: var(--text-on-dark-3);
   font-size: var(--fs-aux);
 }
 
@@ -1530,7 +1542,7 @@ main {
 .policy-ribbon p {
   justify-self: end;
   margin: 0;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--text-on-dark-3);
   font-size: var(--fs-aux);
 }
 
@@ -1818,7 +1830,7 @@ main {
 .catalog-hero p {
   max-width: 760px;
   margin: 0;
-  color: rgba(255, 255, 255, 0.62);
+  color: var(--text-on-dark-2);
   font-size: var(--fs-read);
   line-height: 1.65;
 }
@@ -1838,7 +1850,7 @@ main {
 }
 
 .hero-counter span {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--text-on-dark-3);
   line-height: 1.5;
 }
 
@@ -2001,7 +2013,7 @@ main {
 }
 
 .device-assignment span {
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-on-dark-3);
   font-size: var(--fs-aux);
 }
 
@@ -2228,7 +2240,7 @@ main {
 
 .history-table > header {
   padding: 13px var(--sp-c18);
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-on-dark-2);
   background: var(--ink);
   font-family: "Oswald", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   font-size: var(--fs-aux);
@@ -4028,7 +4040,7 @@ main {
   width: max-content;
   padding: 5px 7px;
   color: var(--acid);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--line-on-dark-strong);
   font-family: "Oswald", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   font-size: var(--fs-micro);
   letter-spacing: 0.14em;
@@ -4053,7 +4065,7 @@ main {
 }
 
 .modal-rail p {
-  color: rgba(255, 255, 255, 0.48);
+  color: var(--text-on-dark-3);
   font-size: var(--fs-micro);
   line-height: 1.8;
 }
@@ -4070,7 +4082,7 @@ main {
   display: flex;
   align-items: center;
   gap: var(--sp-c10);
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-on-dark-3);
   font-size: var(--fs-micro);
 }
 
@@ -4092,8 +4104,8 @@ main {
   gap: 9px;
   margin-top: auto;
   padding-top: var(--sp-c18);
-  color: rgba(255, 255, 255, 0.46);
-  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text-on-dark-3);
+  border-top: 1px solid var(--line-on-dark);
   font-size: var(--fs-aux);
   line-height: 1.6;
 }
@@ -4526,7 +4538,7 @@ main {
   color: #fff;
 }
 .hero-stat small {
-  color: rgba(255, 255, 255, 0.5); font-size: var(--fs-aux); letter-spacing: 0.06em;
+  color: var(--text-on-dark-3); font-size: var(--fs-aux); letter-spacing: 0.06em;
 }
 .hero-stat.accent b,
 .hero-stat.accent strong { color: var(--coral); }
