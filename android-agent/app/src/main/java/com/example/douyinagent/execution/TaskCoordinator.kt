@@ -19,6 +19,8 @@ class TaskCoordinator(
     private var lastLoggedPage: DouyinPage? = null
     private var pausedReported = false
     private var publishTappedAt = 0L
+    private var verifyTicks = 0
+    private var declSeenAt = 0L
     private var resultShotTaken = false
     private var resultShotAt = 0L
     private var resultReported = false
@@ -58,22 +60,47 @@ class TaskCoordinator(
         // and finish — regardless of which page Douyin lands on.
         if (state.step == ExecutionStep.VERIFYING_RESULT) {
             val now = System.currentTimeMillis()
+            // 插桩：这一段是最后一个黑盒。任务点完发布之后就停在这里不动，
+            // 而这里本该每 tick 都跑（tick 里有 reevaluate 强制重算页面）。
+            // 每 3 次进来打一条，别刷屏。
+            verifyTicks += 1
+            if (verifyTicks % 3 == 1) {
+                reporter.log(
+                    "debug", "verifying",
+                    "结果确认第 $verifyTicks 轮：页面=$page 截图已拍=$resultShotTaken " +
+                        "已报结果=$resultReported 声明处理=$declarationDismissed 次 " +
+                        "距点发布=${(now - publishTappedAt) / 1000}秒 " +
+                        "窗口数=${actions.windowCount()} " +
+                        "看到自主声明=${actions.textsMatchingAnyWindow("自主声明").isNotEmpty()}",
+                )
+            }
             // 小红书 may interpose a "以下情况需声明，无则直接发布" sheet between
             // tapping 发布笔记 and the note actually posting. We never add a
             // 声明, so just tap 发布笔记 again to proceed. Reset the result
             // timers so the screenshot waits for the REAL published frame.
             // Guard with a counter so a stuck sheet can't loop forever.
             if (!resultShotTaken && declarationDismissed < 3) {
-                // 同上：弹层是独立窗口，必须跨窗口找
-                if (actions.textsMatchingAnyWindow("需声明").isNotEmpty() ||
-                    actions.textsMatchingAnyWindow("添加声明").isNotEmpty()
+                // ⚠ **必须按平台隔开**，否则这一条会把抖音的面板吃掉：
+                // 抖音的面板标题是「为作品**添加声明**」—— 正好命中下面的
+                // "添加声明"，于是走进小红书分支、去点一个抖音上不存在的
+                // 「发布笔记」，然后**无条件 return**。抖音那段永远执行不到。
+                // 而这个分支只在点中时计数、只在点中时写日志，所以表现是
+                // **零日志、零计数、无限循环** —— 云机6015 卡了一整天就是这个。
+                // 一个子串碰撞，找了四轮才找到。
+                if (task.platform == "xhs" && (
+                        actions.textsMatchingAnyWindow("需声明").isNotEmpty() ||
+                            actions.textsMatchingAnyWindow("添加声明").isNotEmpty()
+                        )
                 ) {
-                    val tapped = actions.clickTextAnyWindow(listOf("发布笔记"))
-                    if (tapped) {
-                        declarationDismissed += 1
-                        publishTappedAt = now
-                        reporter.log("info", "publish", "小红书声明弹窗，自动点发布笔记")
-                    }
+                    // 同抖音那段：计尝试次数、无论成败都写日志，否则点不中就是无限循环
+                    declarationDismissed += 1
+                    val tapped = actions.clickTextAnyWindow(listOf("发布笔记")) ||
+                        actions.tapByTextAnyWindow(listOf("发布笔记"))
+                    reporter.log(
+                        "info", "publish",
+                        "小红书声明弹窗第 $declarationDismissed 次：发布笔记=$tapped",
+                    )
+                    if (tapped) publishTappedAt = now
                     return
                 }
                 // 抖音 interposes a "为作品添加自主声明" sheet on 发作品. We don't add a
@@ -89,14 +116,39 @@ class TaskCoordinator(
                 //
                 // 这是同一个坑的第三次 —— `clickTextAnyWindow` 当初就是为
                 // @ 选择器那个浮层加的，注释里写得很清楚，这里却还在用单窗口版本。
-                if (actions.textsMatchingAnyWindow("自主声明").isNotEmpty()) {
-                    actions.clickTextAnyWindow(listOf("无需添加自主声明"))
+                if (task.platform != "xhs" &&
+                    actions.textsMatchingAnyWindow("自主声明").isNotEmpty()
+                ) {
+                    // ⚠ 计数必须放在**进来就加**，不能只在点中时加。
+                    // 原来是 `if (tapped) declarationDismissed += 1`，于是
+                    // 「点不中」永远停在 0，那道 `< 3` 的护栏形同虚设 ——
+                    // 每个 tick 原地重来一次，**一条日志都不写**，
+                    // 任务就这么无限挂着（云机6015 实测 158 秒后仍是 0 次）。
+                    if (declSeenAt == 0L) declSeenAt = now
+                    declarationDismissed += 1
+                    val noDecl = actions.clickTextAnyWindow(listOf("无需添加自主声明"))
                     Thread.sleep(400)
-                    val tapped = actions.clickTextAnyWindow(listOf("发作品"))
+                    // 面板里的「发作品」是个 clickable=false 的 TextView，
+                    // ACTION_CLICK 会往上找可点父节点 —— 找不到就得**用坐标兜底**，
+                    // clickTextAnyWindow 本身没有坐标兜底，所以这里补一手。
+                    val tapped = actions.clickTextAnyWindow(listOf("发作品")) ||
+                        actions.tapByTextAnyWindow(listOf("发作品"))
+                    reporter.log(
+                        "info", "publish",
+                        "自主声明面板第 $declarationDismissed 次：无需声明=$noDecl 发作品=$tapped",
+                    )
                     if (tapped) {
-                        declarationDismissed += 1
                         publishTappedAt = now
-                        reporter.log("info", "publish", "抖音自主声明弹窗：选无需声明后发作品")
+                    } else if (declarationDismissed >= 3 || now - declSeenAt > 20_000) {
+                        // 点不动就说清楚，别再耗着手机
+                        reporter.screenshot("declaration_stuck")
+                        state.moveTo(ExecutionStep.FAILED)
+                        reporter.status(
+                            "failed", "declaration_blocked", 0,
+                            "抖音的自主声明面板挡着，试了 $declarationDismissed 次点不到「发作品」。" +
+                                "屏上文字：[" +
+                                actions.textsMatchingAnyWindow("声明").take(4).joinToString("/") + "]",
+                        )
                     }
                     return
                 }
@@ -114,8 +166,28 @@ class TaskCoordinator(
             if (resultShotTaken && !resultReported &&
                 now - resultShotAt >= RESULT_UPLOAD_GRACE_MS
             ) {
-                resultReported = true
-                reporter.status("succeeded", "completed", 100, "已自动发布，已回传结果截图")
+                // ⚠ 报成功必须有**正面证据**，不能只数秒表。
+                // 这一段名叫「验证结果」，但原来只是点完发布数 6+3 秒就无条件报
+                // succeeded —— 从不看屏幕。声明面板挡着、风控弹窗、审核拦截、
+                // 退回编辑页，抖音怎么回应都不影响结论：控制台全绿、内容出池，
+                // 而账号上一篇都没有。**卡死至少后端 10 分钟能判出来，报绿永远判不出来。**
+                val stillOnConfirm =
+                    actions.textsMatchingAnyWindow(
+                        Selectors.current.publishButtons.firstOrNull() ?: "发布",
+                    ).isNotEmpty()
+                if (page == DouyinPage.PUBLISH_SUCCESS || !stillOnConfirm) {
+                    resultReported = true
+                    reporter.status("succeeded", "completed", 100, "已自动发布，已回传结果截图")
+                } else if (now - publishTappedAt >= VERIFY_TIMEOUT_MS) {
+                    resultReported = true
+                    state.moveTo(ExecutionStep.FAILED)
+                    reporter.status(
+                        "failed", "publish_not_confirmed", 0,
+                        "点了发布，${VERIFY_TIMEOUT_MS / 1000} 秒后仍停在发布确认页。" +
+                            "屏上带「发」的文字：[" +
+                            actions.textsMatchingAnyWindow("发").take(6).joinToString("/") + "]",
+                    )
+                }
             }
             return
         }
@@ -272,7 +344,27 @@ class TaskCoordinator(
                 // (this callback is the accessibility main thread → would ANR).
                 if (state.step < ExecutionStep.WAITING_CONFIRMATION) {
                     state.moveTo(ExecutionStep.WAITING_CONFIRMATION)
-                    Thread { fillAndPublish(task, actions) }.start()
+                    // ⚠ **必须兜住异常**。这个线程负责把状态推到 VERIFYING_RESULT
+                    // （moveTo 是 fillAndPublish 的最后一行）。中间任何一处抛异常，
+                    // 线程就无声死掉：状态永远停在 WAITING_CONFIRMATION，
+                    // onPage 每次进来都因为 `step < WAITING_CONFIRMATION` 为假而什么都不做，
+                    // 于是任务挂在那里、手机一直被占着，**没有任何日志、没有任何报错**。
+                    //
+                    // 2026-09-09 云机6015 就是这样白占了 32 分钟，最后被无障碍熔断
+                    // 顺手带走，报出来的原因还和真实情况无关。
+                    Thread {
+                        try {
+                            fillAndPublish(task, actions)
+                        } catch (error: Throwable) {
+                            // 如实说出来，并把任务收掉 —— 手机要还给后面的任务
+                            reporter.status(
+                                "failed", "publish_crashed", 0,
+                                "发布过程中出错：${error.javaClass.simpleName}" +
+                                    "${error.message?.let { "：$it" } ?: ""}",
+                            )
+                            state.moveTo(ExecutionStep.FAILED)
+                        }
+                    }.start()
                 }
             }
             DouyinPage.PUBLISH_SUCCESS -> {
@@ -381,11 +473,21 @@ class TaskCoordinator(
             //
             // 重试三次并且每次**重新读一遍控件树**：上一帧的节点可能已经失效，
             // 拿旧的 root 点必然点空。
+            // 插桩：这一段曾经"什么都不说"地卡死过（云机6015，连续 4 条任务）。
+            // 已排除异常（外层 try/catch 什么都没报）、状态机顺序、tick 没跑。
+            // 剩下的可能是某个无障碍调用**不返回**，所以每一步都留一条日志 ——
+            // 下次再卡，日志会直接指出停在哪一行，不用再猜。
             var tapped = false
             for (attempt in 0 until 3) {
+                reporter.log("debug", "publishing", "点发布：第 ${attempt + 1} 次，正在读控件树")
                 val r = actions.root()
+                reporter.log(
+                    "debug", "publishing",
+                    "点发布：控件树${if (r == null) "为空" else "已拿到"}，开始找按钮",
+                )
                 tapped = actions.clickAnyText(r, Selectors.current.publishButtons) ||
                     actions.tapByText(r, Selectors.current.publishButtons)
+                reporter.log("debug", "publishing", "点发布：第 ${attempt + 1} 次结果=$tapped")
                 if (tapped) break
                 Thread.sleep(1200)
             }
@@ -403,6 +505,7 @@ class TaskCoordinator(
             }
             publishTappedAt = System.currentTimeMillis()
             state.moveTo(ExecutionStep.VERIFYING_RESULT)
+            reporter.log("info", "publishing", "已点发布，进入结果确认阶段")
         }
     }
 
@@ -445,6 +548,9 @@ class TaskCoordinator(
         // async MediaProjection capture + upload finish before the task tears
         // down (currentTask=null + returnToForeground), so the 截图 actually回传s.
         private const val RESULT_UPLOAD_GRACE_MS = 3000L
+        // 点完发布最多等这么久还没离开确认页，就当没发出去 —— 宁可报失败
+        // 让它重排，也不要报一个假的成功（那个连后端都判不出来）。
+        private const val VERIFY_TIMEOUT_MS = 45_000L
         // After typing, let the keyboard collapse before tapping 下一步.
         private const val COMPOSER_SETTLE_MS = 1800L
         // Let the template page render (recommended template + strip) before

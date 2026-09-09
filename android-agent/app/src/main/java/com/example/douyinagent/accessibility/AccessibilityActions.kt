@@ -177,6 +177,23 @@ class AccessibilityActions(
      * window (or null), so a check that only looks there reports "not there yet"
      * for a page that is plainly on screen.
      */
+    /** 当前能看到几个窗口 —— 用来判断 service.windows 到底有没有内容。 */
+    fun windowCount(): Int = try { service.windows.size } catch (_: Throwable) { -1 }
+
+    /**
+     * 跨窗口的**坐标**兜底。`clickTextAnyWindow` 只做 ACTION_CLICK ——
+     * 而弹层里的按钮常常是 `clickable=false` 的 TextView，往上又找不到可点父节点
+     * （实测抖音自主声明面板的「发作品」就是：TextView / clickable=false）。
+     * 这种时候只能按 bounds 点坐标。
+     */
+    fun tapByTextAnyWindow(candidates: List<String>): Boolean {
+        for (window in service.windows) {
+            val root = window.root ?: continue
+            if (tapByText(root, candidates)) return true
+        }
+        return false
+    }
+
     fun textsMatchingAnyWindow(substr: String): List<String> {
         val out = mutableListOf<String>()
         for (window in service.windows) {

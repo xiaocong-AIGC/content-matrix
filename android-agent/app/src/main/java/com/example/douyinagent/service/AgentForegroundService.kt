@@ -44,11 +44,48 @@ class AgentForegroundService :
     private var reportedAnomaly: String? = null
     private val screenCapture by lazy { ScreenCaptureManager(this) }
 
+    /**
+     * 进程级的最后一道网：任何后台线程抛出未捕获异常时，至少让它**留下痕迹**，
+     * 并把手上那条任务收掉。
+     *
+     * 为什么需要它：这个 Agent 用裸 `Thread {}` 跑发布和群发流程，
+     * 而 Kotlin/Java 的线程默认行为是"异常打印到 stderr 然后线程静静地死"。
+     * 在 Android 上 stderr 甚至不一定进 logcat —— 于是表现就是**什么都没发生**：
+     * 状态机停在半路、手机被占着、日志停在最后一条正常记录、控制台一片绿。
+     * 2026-09-09 云机6015 白占 32 分钟就是这么来的，而且报出来的原因还是错的。
+     *
+     * 每个线程自己的 try/catch 是主防线（能给出准确的失败原因），
+     * 这里是兜底：以后有人再加一个裸线程，它也不会无声消失。
+     */
+    private fun installCrashNet() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            try {
+                android.util.Log.e(
+                    "AgentCrash", "线程 ${thread.name} 未捕获异常", error,
+                )
+                updateLocalStatus("后台线程出错：${error.javaClass.simpleName}")
+                // 手上有任务就收掉，别让它挂着占手机
+                currentTask?.let {
+                    status(
+                        "failed", "agent_crashed", 0,
+                        "Agent 后台线程未捕获异常（${thread.name}）：" +
+                            "${error.javaClass.simpleName}${error.message?.let { m -> "：$m" } ?: ""}",
+                    )
+                }
+            } catch (_: Throwable) {
+                // 兜底里再抛就真没救了，闭嘴让它走默认流程
+            }
+            previous?.uncaughtException(thread, error)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         preferences = AgentPreferences(this)
         api = createApi()
         AgentRuntime.listener = this
+        installCrashNet()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("正在连接后端"))
         updateLocalStatus("Agent 正在启动")
@@ -537,7 +574,18 @@ class AgentForegroundService :
             updateLocalStatus("开始群发任务 #${task.id}")
             // Run on its own thread so the ticker keeps heartbeating + renewing
             // the lease (otherwise a multi-group send would expire the lease).
-            Thread { runBroadcast(task) }.start()
+            Thread {
+                try {
+                    runBroadcast(task)
+                } catch (error: Throwable) {
+                    // 同 fillAndPublish：线程死了没人知道，任务就永远挂着。
+                    status(
+                        "failed", "broadcast_crashed", 0,
+                        "群发过程中出错：${error.javaClass.simpleName}" +
+                            "${error.message?.let { "：$it" } ?: ""}",
+                    )
+                }
+            }.start()
             return
         }
         coordinator = TaskCoordinator(this)
