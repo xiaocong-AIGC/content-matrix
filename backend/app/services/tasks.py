@@ -116,6 +116,34 @@ def count_today_published(
     ).one()
 
 
+def clicked_publish(session: Session, task: PublishTask) -> bool:
+    """这条任务**已经把发布按钮按下去了**吗？
+
+    判据是执行日志里那条 info 级的 `publishing` —— Agent 在真正点下去之前
+    发的最后一条状态（「内容已就绪，自动点击发布」），以及点完之后进入
+    结果确认阶段的 `verifying`。同一步的 debug 日志是排查用的插桩，
+    warning 是「标题没写进去但继续」，都不算数。
+
+    为什么需要它：**点完发布之后失联，和根本没点到，是两件完全不同的事。**
+    前者很可能已经发到真实账号上了，后者一定没有。以前两者都算「失败」，
+    内容一起退回内容池，于是前者会被再发一遍 —— 2026-09-09 实测过一次：
+    任务 #1672 在 17:10:42 点了发布，Agent 随即被换包打断，任务记的是
+    `lease_expired`，而手机上那条 10 分钟前就已经发出去了（14 浏览）。
+    要不是人工拦下，17:35 的自动补发会把同一篇再发一次。
+
+    0.9.0 那批如实的失败码（`publish_button_missing` / `caption_empty` /
+    `declaration_blocked`）正好在这里派上用场：它们都停在点击之前，
+    照常退回内容池，不受这条判据影响。
+    """
+    row = session.exec(
+        select(ExecutionLog)
+        .where(ExecutionLog.task_id == task.id)
+        .where(ExecutionLog.level == "info")
+        .where(ExecutionLog.step.in_(["publishing", "verifying"]))
+    ).first()
+    return row is not None
+
+
 def _finalize_content(session: Session, task: PublishTask, succeeded: bool) -> None:
     """A task that consumed pooled content reached a terminal state. Re-evaluate
     from ALL tasks of this content (a `both` content fans out to 2 — 抖音 + 小红书):
@@ -146,11 +174,25 @@ def _finalize_content(session: Session, task: PublishTask, succeeded: bool) -> N
 
             supply_trigger.poke(f"{content.city or '通用'}发出去一篇")
     elif all_terminal:
-        # Every fan-out task failed/cancelled → return to the pool.
-        content.status = ContentStatus.PENDING
-        content.published_device_id = None
-        content.published_task_id = None
-        content.published_at = None
+        # ⚠ 退回内容池之前先问一句：**有没有哪一条其实已经点下了发布按钮？**
+        # 有的话就不能退 —— 退回去就会被再发一遍，而重复发到真实账号上
+        # 只能人工去删；少发一篇明天自动补得回来。两边的代价不对称，
+        # 所以宁可当它发出去了。见 `clicked_publish` 里那次实测。
+        maybe_live = next(
+            (t for t in siblings if clicked_publish(session, t)), None
+        )
+        if maybe_live is not None:
+            content.status = ContentStatus.PUBLISHED
+            content.published_device_id = maybe_live.device_id
+            content.published_task_id = maybe_live.id
+            content.published_at = content.published_at or now
+        else:
+            # 确实一次都没点到发布（按钮没找到 / 正文没写进去 / 声明面板拦住），
+            # 那手机上一定没有这条，放心退回池子等下一个时段。
+            content.status = ContentStatus.PENDING
+            content.published_device_id = None
+            content.published_task_id = None
+            content.published_at = None
     else:
         # A sibling is still running — keep it out of the pool.
         content.status = ContentStatus.PUBLISHING
@@ -160,6 +202,70 @@ def _finalize_content(session: Session, task: PublishTask, succeeded: bool) -> N
 
 
 PUBLISH_WINDOWS_KEY = "publish:windows"
+
+
+def _retry_outlook(
+    session: Session,
+    account: "DeviceAccount | None",
+    task: PublishTask,
+    now: datetime,
+) -> str:
+    """失败通知的最后一句：**这一条会不会自动补回来**。
+
+    以前这里写死一句「去排期页重新排一条补上」—— 而引擎其实一直在自动补：
+    失败不占当天的名额（见 `_due_by_plan`），退避 20 分钟后自己再建一条。
+    于是运营照着提示手动排一条，引擎又自动排一条，同一篇内容发两遍到真实
+    账号上。**一句过期的文案，代价是重复发帖。**
+
+    所以这句话必须现算，不能写死。四种情况说四种话。
+    """
+    if account is None or not account.auto_publish:
+        return "这个号的自动发布没开着，要发的话去排期页手动排一条"
+    if account.health != "normal":
+        return "这个号现在是异常状态，处理好之前不会自动重发"
+
+    rows = session.exec(
+        select(PublishTask)
+        .where(PublishTask.target_device_id == account.device_id)
+        .where(PublishTask.platform == account.platform)
+        .where(PublishTask.publish_type != "group_message")
+        .where(PublishTask.created_at >= cn_day_start_utc())
+        .where(PublishTask.status.in_([TaskStatus.SUCCEEDED, TaskStatus.FAILED]))
+        .order_by(PublishTask.finished_at.desc())
+    ).all()
+    streak = 0
+    for row in rows:
+        if row.status != TaskStatus.FAILED:
+            break
+        streak += 1
+    if streak >= FAIL_GIVE_UP:
+        return f"今天连着失败 {streak} 次，先不自动重发了，去看看这台手机"
+
+    finished = task.finished_at or now
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=timezone.utc)
+    wait = min(FAIL_BACKOFF_BASE * (2 ** max(streak - 1, 0)), FAIL_BACKOFF_MAX)
+    retry_at = finished + wait
+
+    windows = publish_windows(session)
+    if not windows:
+        return f"{_cn_hhmm(retry_at)} 前后会自动重发一条，不用管"
+    # 退避结束之后，今天还剩不剩发布时段
+    from app.services.schedule_windows import CN_TZ
+
+    end_of_last = max(end for _, end in windows)
+    retry_cn = retry_at.astimezone(CN_TZ)
+    if retry_cn.hour * 60 + retry_cn.minute <= end_of_last:
+        return f"{_cn_hhmm(retry_at)} 之后会自动重发一条，不用管"
+    return "今天的发布时段过了，明天第一个时段会自动补上，不用管"
+
+
+def _cn_hhmm(moment: datetime) -> str:
+    from app.services.schedule_windows import CN_TZ
+
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(CN_TZ).strftime("%H:%M")
 
 
 def publish_windows(session: Session) -> list[tuple[int, int]]:
@@ -1204,7 +1310,16 @@ def notify_task_finished(session: Session, task: PublishTask) -> None:
         lines.append(f"{prefix}{why}")
         if step:
             lines.append(f"停在了{step}")
-        lines.append("去排期页重新排一条补上")
+        if clicked_publish(session, task):
+            # 这一条已经把发布按下去了才失联 —— 大概率手机上已经有了。
+            # 说清楚，别让人以为它没发出去而手动补一条。
+            lines.append(
+                "发布按钮已经点下去了才失联，手机上很可能已经有这条，"
+                "已按已发布记账、不会自动重发"
+            )
+            lines.append("去手机上看一眼；确实没发出去的话，在内容库点「退回待发」")
+        else:
+            lines.append(_retry_outlook(session, account, task, utcnow()))
     lines.append(tail)
 
     notify.enqueue(

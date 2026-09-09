@@ -512,7 +512,13 @@ def _progress_parts(session: Session) -> dict:
             f"还没发的这 {len(unscheduled)} 个号，今天都还没安排内容，去排期页排一下",
             "warning"))
     if bad:
-        actions.append(_c(f"有 {len(bad)} 条没发出去，去排期页重新排一下", "warning"))
+        # ⚠ 不要写成「去排期页重新排一下」。引擎会自己补：失败不占当天名额，
+        # 退避 20 分钟后自动再建一条（`tasks._due_by_plan` / `_failure_backoff`）。
+        # 让运营手动再排一条 = 同一篇内容发两遍到真实账号上。
+        # 这里只报数，要不要动手看单条通知里那句现算的结论。
+        actions.append(_c(
+            f"有 {len(bad)} 条没发出去，引擎会在后面的时段自动补，不用手动排",
+            "warning"))
     if waiting:
         actions.append(_c(f"有 {len(waiting)} 条卡住了，要有人去手机上看一眼", "warning"))
     if g_bad:
