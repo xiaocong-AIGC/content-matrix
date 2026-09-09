@@ -31,7 +31,7 @@
   --topbar-h: 94px;
 
 /* ══════════════════════════════════════════════════════════════════════════
-   发布室 · 设计令牌 v1（一期）
+   图文矩阵 · 设计令牌 v1（一期）
    贴进 styles.css 现有 :root 块**内部末尾**（第 23 行 --topbar-h 之后）。
    现有 15 个自定义属性一行不动。贴上去后页面**只有 1 处像素变化**：
    .content-city 的底色 alpha 从 0.10 变 0.08（两个 fallback 本来就不一致）。
@@ -193,6 +193,18 @@
   --ctl-h-md: 38px;  /* 输入框、下拉、次要按钮——首页筛选条整行统一到这一档 */
   --ctl-h-lg: 42px;  /* 主按钮、登录框（= .button 现值，一期不动） */
   --hit-min:  32px;  /* 可点区最小命中尺寸（现状 22/30/36/36/42 五种） */
+
+  /* ── 8b. 输入框形态：22 条规则量出 21 种形态 ────────────────────────
+     6 种高度（30/34/38/42/43/44）、8 种内边距（0 11px / 9px 11px /
+     11px 13px / 11px / 0 8px / 0 12px …）、边框在 --line 和 --line-strong
+     之间随机分布、圆角三个别名混用。这不是设计过的层次 —— 是同一个控件
+     被十四个人各写了一遍。
+     先并没人选过的那几维（内边距、边框、圆角），高度单独一步走：
+     高度动的是每屏能放几行，要看着改。 */
+  --in-pad-x: 11px;              /* 横向内边距，13 条规则里 9 条已经是它 */
+  --in-pad-y: 9px;               /* 纵向：只给不设高度的 textarea 用 */
+  --in-bd: 1px solid var(--line-strong);  /* 13 条已是 strong，3 条是浅的 */
+  --in-r: var(--r-ctl);          /* --r-c10 已并到 --r-ctl，写全名少一跳 */
 
   /* ── 9. 布局常量：把 124px 这个魔数变成变量 ─────────────────────────
      3675 行的 top: calc(var(--topbar-h) + 124px) 是照抄 hero 的 min-height，
@@ -2178,9 +2190,9 @@ main {
 }
 
 .device-date-bar input[type="date"] {
-  height: 34px;
-  padding: 0 var(--sp-c10);
-  border: 1px solid var(--line-strong);
+  height: var(--ctl-h-sm);
+  padding: 0 var(--in-pad-x);
+  border: var(--in-bd);
   background: white;
   font-size: var(--fs-body);
 }
@@ -2897,9 +2909,9 @@ main {
 }
 
 .schedule-field input {
-  height: 42px;
-  padding: 0 11px;
-  border: 1px solid var(--line-strong);
+  height: var(--ctl-h-md);
+  padding: 0 var(--in-pad-x);
+  border: var(--in-bd);
   background: white;
   font-size: var(--fs-read);
 }
@@ -3849,9 +3861,9 @@ main {
 }
 
 .content-pub-filters select {
-  height: 30px;
-  padding: 0 var(--sp-4);
-  border: 1px solid var(--line-strong);
+  height: var(--ctl-h-sm);
+  padding: 0 var(--in-pad-x);
+  border: var(--in-bd);
   background: white;
   font-size: var(--fs-body);
 }
@@ -4211,7 +4223,7 @@ main {
 
 .field input,
 .field select {
-  height: 43px;
+  height: var(--ctl-h-md);
   padding: 0 11px;
 }
 
@@ -4313,9 +4325,9 @@ main {
 }
 
 .login-card input {
-  height: 44px;
+  height: var(--ctl-h-lg);
   padding: 0 var(--sp-5);
-  border: 1px solid var(--line-strong);
+  border: var(--in-bd);
   font-size: var(--fs-strong);
 }
 
@@ -4444,7 +4456,7 @@ main {
 .ai-generate-bar label { display: flex; flex-direction: column; gap: var(--sp-3);
   font-size: var(--fs-body); color: var(--muted); font-weight: 600; }
 .ai-generate-bar input, .ai-generate-bar select {
-  border: 1px solid var(--line-strong); border-radius: var(--r-c10); padding: 9px 11px;
+  border: var(--in-bd); border-radius: var(--in-r); padding: var(--in-pad-y) var(--in-pad-x);
   background: var(--paper); color: var(--ink); font-size: var(--fs-strong); }
 .ai-generate-bar input[type="number"] { width: 76px; }
 .ai-generate-bar .ai-theme { flex: 1; min-width: 220px; }
@@ -4477,14 +4489,14 @@ main {
 .ai-field { display: flex; flex-direction: column; gap: 5px;
   font-size: var(--fs-body); color: var(--muted); font-weight: 600; }
 .ai-field input, .ai-field textarea {
-  border: 1px solid var(--line); border-radius: var(--r-c10); padding: 9px 11px;
+  border: var(--in-bd); border-radius: var(--in-r); padding: 9px 11px;
   background: var(--paper); color: var(--ink); font-size: var(--fs-strong);
   font-family: inherit; resize: vertical; line-height: 1.5; }
 .ai-draft-actions { display: flex; align-items: flex-end; gap: var(--sp-c10); margin-top: var(--sp-2); }
 .ai-city { display: flex; flex-direction: column; gap: 5px; font-size: var(--fs-body);
   color: var(--muted); font-weight: 600; margin-right: auto; }
-.ai-city input { width: 90px; border: 1px solid var(--line);
-  border-radius: var(--r-c10); padding: var(--sp-4) var(--sp-c10); background: var(--paper); }
+.ai-city input { width: 90px; border: var(--in-bd);
+  border-radius: var(--in-r); padding: var(--sp-4) var(--sp-c10); background: var(--paper); }
 .spin { animation: ai-spin 0.9s linear infinite; }
 @keyframes ai-spin { to { transform: rotate(360deg); } }
 
@@ -4703,7 +4715,7 @@ main {
 .token-create { display: flex; gap: var(--sp-5); margin-top: var(--sp-c18); flex-wrap: wrap; }
 .token-create input { flex: 1; min-width: 240px; }
 .token-create input, .token-create select {
-  border: 1px solid var(--line-strong); border-radius: var(--r-c10); padding: 11px 13px;
+  border: var(--in-bd); border-radius: var(--in-r); padding: var(--in-pad-y) var(--in-pad-x);
   background: var(--white); color: var(--ink); font-size: var(--fs-strong);
 }
 .token-fresh {
@@ -4757,8 +4769,8 @@ main {
 .renewal-config > header { display: flex; align-items: center; gap: var(--sp-4); font-weight: 700; color: var(--ink); margin-bottom: var(--sp-5); }
 .renewal-config > header small { font-weight: 400; color: var(--muted); font-size: var(--fs-body); margin-left: auto; }
 .renewal-config textarea {
-  width: 100%; box-sizing: border-box; border: 1px solid var(--line-strong);
-  border-radius: var(--r-c10); padding: 11px; font-family: inherit; font-size: var(--fs-read);
+  width: 100%; box-sizing: border-box; border: var(--in-bd);
+  border-radius: var(--in-r); padding: var(--in-pad-y) var(--in-pad-x); font-family: inherit; font-size: var(--fs-read);
   background: var(--paper); color: var(--ink); resize: vertical;
 }
 .renewal-uploads { display: flex; gap: 20px; margin-top: var(--sp-c14); }
@@ -4807,7 +4819,7 @@ main {
 .my-renewal-status.rs-rejected { color: var(--coral-dark); }
 .renew-form { display: flex; flex-direction: column; gap: var(--sp-4); }
 .renew-form input {
-  border: 1px solid var(--line-strong); border-radius: var(--r-ctl); padding: var(--sp-c10) var(--sp-5);
+  border: var(--in-bd); border-radius: var(--in-r); padding: var(--sp-c10) var(--sp-5);
   background: var(--paper); color: var(--ink); font-size: var(--fs-read); width: 100%; box-sizing: border-box;
 }
 .renew-upload { display: flex; flex-direction: column; gap: var(--sp-3); font-size: var(--fs-body); color: var(--muted); }
@@ -4816,12 +4828,12 @@ main {
 /* ---- 24小时 date+time 选择器 ---- */
 .dt24 { display: flex; align-items: center; gap: var(--sp-c10); flex-wrap: wrap; }
 .dt24 input[type="date"] {
-  border: 1px solid var(--line-strong); border-radius: var(--r-ctl); padding: 9px 11px;
+  border: var(--in-bd); border-radius: var(--in-r); padding: var(--in-pad-y) var(--in-pad-x);
   background: var(--white); color: var(--ink); font-size: var(--fs-strong);
 }
 .dt24-time { display: flex; align-items: center; gap: var(--sp-2); }
 .dt24-time select {
-  border: 1px solid var(--line-strong); border-radius: var(--r-ctl); padding: 9px var(--sp-4);
+  border: var(--in-bd); border-radius: var(--in-r); padding: var(--in-pad-y) var(--in-pad-x);
   background: var(--white); color: var(--ink); font-size: var(--fs-strong); font-variant-numeric: tabular-nums;
 }
 .dt24-24h { font-size: var(--fs-aux); color: var(--muted); margin-left: var(--sp-2); }
@@ -4925,8 +4937,8 @@ main {
 }
 .wizard-token code { font-size: var(--fs-strong); font-weight: 700; word-break: break-all; color: var(--ink); }
 .wizard-input {
-  width: 100%; height: 42px; padding: 0 var(--sp-5); margin-bottom: var(--sp-c10);
-  border: 1px solid var(--line-strong); border-radius: var(--r-ctl); background: white; font-size: var(--fs-read);
+  width: 100%; height: var(--ctl-h-md); padding: 0 var(--sp-5); margin-bottom: var(--sp-c10);
+  border: var(--in-bd); border-radius: var(--in-r); background: white; font-size: var(--fs-read);
 }
 .wizard-actions { display: flex; gap: var(--sp-c10); justify-content: center; margin-top: var(--sp-c14); }
 .wizard-actions .button { min-width: 120px; justify-content: center; }
@@ -5340,10 +5352,10 @@ main {
   gap: var(--sp-4);
 }
 .kv-row input {
-  height: 38px;
-  padding: 0 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-ctl);
+  height: var(--ctl-h-md);
+  padding: 0 var(--in-pad-x);
+  border: var(--in-bd);
+  border-radius: var(--in-r);
   outline: none;
   background: var(--white);
   color: var(--ink);

@@ -77,7 +77,7 @@ export function FirstRunWizard({
     <div className="modal-backdrop wizard-backdrop" role="presentation">
       <section className="wizard" role="dialog" aria-modal="true">
         <header className="wizard-head">
-          <span>发布室 · 首次配置</span>
+          <span>图文矩阵 · 首次配置</span>
           <div className="wizard-steps">
             {[1, 2, 3].map((n) => (
               <i key={n} className={n <= step ? "on" : ""} />
@@ -90,7 +90,7 @@ export function FirstRunWizard({
             <KeyRound size={30} strokeWidth={1.2} />
             <h2>这是你的管理员令牌</h2>
             <p>
-              请<b>妥善保存</b>。以后登录发布室都用它，换别的电脑或手机也一样。
+              请<b>妥善保存</b>。以后登录控制台都用它，换别的电脑或手机也一样。
               这个令牌只显示这一次。
             </p>
             <div className="wizard-token">

@@ -406,7 +406,7 @@ export default function App() {
             submitToken();
           }}
         >
-          <strong>发布室 · 控制台登录</strong>
+          <strong>图文矩阵 · 控制台登录</strong>
           <p>请输入管理令牌。</p>
           <input
             type="password"
@@ -435,7 +435,7 @@ export default function App() {
             <span />
           </div>
           <div>
-            <strong>发 布 室</strong>
+            <strong>图 文 矩 阵</strong>
             <span>CONTENT MATRIX PLATFORM</span>
           </div>
         </div>
