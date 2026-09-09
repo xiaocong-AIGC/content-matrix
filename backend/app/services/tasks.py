@@ -740,6 +740,84 @@ def reclaim_expired_tasks(session: Session) -> int:
     return reclaimed
 
 
+# 任务在 running/leased 里**多久没有新日志**就算卡死。
+# 正常发布每一步之间是秒级的（实测 +0/2/3/5/9/12/22 秒走完全程），
+# 10 分钟一声不吭只有一种解释：它不动了。
+STALLED_AFTER = timedelta(minutes=10)
+
+
+def fail_stalled_tasks(session: Session) -> int:
+    """任务卡在 running/leased、而且一直没有新日志 —— 收掉它，把手机让出来。
+
+    ⚠ 这是一个**此前完全没人管**的状态。已有的两道闸都盖不到它：
+    - `reclaim_expired_tasks` 看的是租约过期，而 Agent 还活着、一直在续租约；
+    - `fail_stuck_confirmations` 只管 `waiting_confirmation`，而这条任务的
+      DB 状态一直是 running（`waiting_since` 是 None）。
+
+    2026-09-09 的现场：一条自动发布走到发布确认页、日志写着「内容已就绪，
+    自动点击发布」，然后**整整 32 分钟一声不吭**，最后是被无障碍熔断顺手带走的 ——
+    报出来的原因（「无障碍反复中断」）和真实情况完全不是一回事，
+    而那台手机白占了半小时。
+
+    判据用**最后一条日志的时刻**，不用 `updated_at`：后者会被续租约刷新，
+    永远是"刚刚"，拿它判卡死等于永远判不出来。
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = now - STALLED_AFTER
+    tasks = session.exec(
+        select(PublishTask).where(
+            PublishTask.status.in_([TaskStatus.RUNNING, TaskStatus.LEASED])
+        )
+    ).all()
+    failed = 0
+    for task in tasks:
+        last_log = session.exec(
+            select(ExecutionLog)
+            .where(ExecutionLog.task_id == task.id)
+            .order_by(ExecutionLog.created_at.desc())
+        ).first()
+        # 没有日志的用 started_at 兜底；两个都没有就跳过（还没真正开始）
+        marker = last_log.created_at if last_log else task.started_at
+        if not marker:
+            continue
+        if marker.tzinfo is None:
+            marker = marker.replace(tzinfo=timezone.utc)
+        if marker >= cutoff:
+            continue
+        stalled_min = int((now - marker).total_seconds() // 60)
+        device_id = task.device_id
+        task.status = TaskStatus.FAILED
+        task.current_step = "stalled"
+        task.error_message = (
+            f"卡在「{task.current_step or '执行中'}」{stalled_min} 分钟没有任何动静，"
+            "已自动结束并把手机让出来"
+        )
+        task.finished_at = now
+        task.updated_at = now
+        task.lease_token = None
+        task.lease_expires_at = None
+        session.add(task)
+        if device_id:
+            device = session.get(Device, device_id)
+            if device and device.current_task_id == task.id:
+                device.status = DeviceStatus.ONLINE
+                device.current_task_id = None
+                device.updated_at = now
+                session.add(device)
+        session.commit()
+        _finalize_content(session, task, succeeded=False)
+        try:
+            notify_task_finished(session, task)
+        except Exception:  # noqa: BLE001 — 通知永远不能影响业务
+            pass
+        append_log(
+            session, task.id, device_id, "warning", "stalled",
+            f"{stalled_min} 分钟没有新进展，这条自动结束，手机让给后面的任务",
+        )
+        failed += 1
+    return failed
+
+
 def fail_stuck_confirmations(session: Session, timeout_seconds: int) -> int:
     """Auto-fail tasks parked in waiting_confirmation longer than the timeout, so a
     page the agent couldn't handle doesn't hold the phone (and the whole queue,

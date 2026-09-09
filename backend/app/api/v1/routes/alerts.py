@@ -34,6 +34,11 @@ _FAILED_CAP = 50
 # confirmation_timeout_seconds(默认 300s) 就自动判失败，所以还能停在这儿超过
 # 10 分钟，说明**那个清扫循环本身没在跑** —— 这是"引擎停了"最早能看见的信号。
 _STUCK_CONFIRM = timedelta(minutes=10)
+# 卡在 running/leased 里不动多久算异常。后台 `fail_stalled_tasks` 10 分钟就该
+# 收掉它，所以超过 15 分钟还挂着，同样说明清扫没在跑。
+# 2026-09-09 实测：一条任务在 running 里卡了 32 分钟无人过问 —— 当时这一类
+# 根本没有告警，它是被无障碍熔断顺手带走的，报的原因还是错的。
+_STUCK_RUNNING = timedelta(minutes=15)
 # 到点还没被领走多久算"积压"。设备在线还领不走 = 领取链路有问题
 # （编排器没起、Agent 没在轮询、手机被一条僵尸任务占着）。
 _BACKLOG_AFTER = timedelta(minutes=30)
@@ -216,7 +221,8 @@ def list_alerts(session: Session = Depends(get_session)):
             }
         )
 
-    # 4) 卡住的任务：转人工之后没人管，而且连自动判死都没发生。
+    # 4) 卡住的任务：转人工之后没人管，或者卡在 running 里不动 ——
+    #    两种都意味着自动判死没有发生，也就是后台清扫本身可能停了。
     stuck = [
         t
         for t in session.exec(
@@ -227,26 +233,37 @@ def list_alerts(session: Session = Depends(get_session)):
         if _aware(t.waiting_since or t.updated_at)
         and _aware(t.waiting_since or t.updated_at) < now - _STUCK_CONFIRM
     ]
+    # running/leased 里不动的：判据用 started_at，因为 updated_at 会被续租约刷新
+    stuck += [
+        t
+        for t in session.exec(
+            select(PublishTask).where(
+                PublishTask.status.in_([TaskStatus.RUNNING, TaskStatus.LEASED])
+            )
+        ).all()
+        if _aware(t.started_at) and _aware(t.started_at) < now - _STUCK_RUNNING
+    ]
     if stuck:
         names = [
             (dev_by_id.get(t.device_id).name if dev_by_id.get(t.device_id) else "未知设备")
             for t in stuck
         ]
         mins = int(
-            (now - min(_aware(t.waiting_since or t.updated_at) for t in stuck)).total_seconds() // 60
+            (now - min(_aware(t.waiting_since or t.started_at or t.updated_at)
+                       for t in stuck)).total_seconds() // 60
         )
         alerts.append(
             {
                 "id": "task-stuck-confirm",
                 "severity": "critical",
                 "kind": "task_stuck",
-                "title": f"{len(stuck)} 条任务停在等人处理，最久 {mins} 分钟",
-                "detail": "正常情况下等超过 5 分钟就会自动跳过、把手机让出来。"
-                "现在没有跳过，说明后台的清扫没在跑 —— 这几台手机不会再接新任务，"
+                "title": f"{len(stuck)} 条任务卡住不动，最久 {mins} 分钟",
+                "detail": "正常情况下卡住超过 10 分钟就会被自动结束、把手机让出来。"
+                "现在没有结束，说明后台的清扫没在跑 —— 这几台手机不会再接新任务，"
                 "请重启后端服务。涉及：" + "、".join(sorted(set(names))[:6]),
                 "target": names[0] if names else None,
                 "device_id": stuck[0].device_id,
-                "at": stuck[0].waiting_since or stuck[0].updated_at,
+                "at": stuck[0].waiting_since or stuck[0].started_at or stuck[0].updated_at,
             }
         )
 

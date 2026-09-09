@@ -29,13 +29,16 @@ async def _retention_loop():
 async def _confirmation_sweep_loop():
     """Every minute, auto-fail tasks stuck in waiting_confirmation past the
     timeout so a stuck page never blocks the phone's queue (incl. 群发) forever."""
-    from app.services.tasks import fail_stuck_confirmations
+    from app.services.tasks import fail_stalled_tasks, fail_stuck_confirmations
 
     timeout = get_settings().confirmation_timeout_seconds
     while True:
         try:
             with Session(engine) as session:
                 fail_stuck_confirmations(session, timeout)
+                # 卡在 running 里不动的任务：租约在续所以回收管不到，
+                # 又不在 waiting_confirmation 所以上面那条也管不到。
+                fail_stalled_tasks(session)
         except Exception:  # noqa: BLE001
             pass
         await asyncio.sleep(60)

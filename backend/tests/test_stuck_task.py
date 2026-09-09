@@ -6,7 +6,7 @@ stops holding the one-job-per-phone device (which would block 群发 etc.).
 
 from datetime import datetime, timedelta, timezone
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.enums import DeviceStatus, TaskStatus
 from app.db.session import create_db_and_tables, engine
@@ -58,3 +58,86 @@ def test_stuck_confirmation_is_auto_failed_and_device_freed():
 
         # disabled (0) is a no-op
         assert fail_stuck_confirmations(session, timeout_seconds=0) == 0
+
+
+def test_卡在running的任务要被收掉():
+    """2026-09-09 的现场：一条自动发布走到发布确认页、日志写着「内容已就绪，
+    自动点击发布」，然后**整整 32 分钟一声不吭**，最后是被无障碍熔断顺手带走的 ——
+    报出来的原因和真实情况完全不是一回事，那台手机白占了半小时。
+
+    此前两道闸都盖不到它：租约回收看的是租约过期，而 Agent 还活着一直在续；
+    人工确认超时只管 waiting_confirmation，而它的状态一直是 running。
+
+    判据必须用**最后一条日志的时刻**，不能用 updated_at —— 后者被续租约刷新，
+    永远是"刚刚"，拿它判卡死等于永远判不出来。
+    """
+    import uuid as _uuid
+
+    from app.models.entities import ExecutionLog
+    from app.services.tasks import fail_stalled_tasks
+
+    create_db_and_tables()
+    with Session(engine) as session:
+        dev = Device(
+            device_code=f"stall-{_uuid.uuid4().hex[:8]}", name="卡死机",
+            status=DeviceStatus.ONLINE,
+            last_heartbeat_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        session.add(dev)
+        session.commit()
+        session.refresh(dev)
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        made = []
+        for name, ago_min in (("卡了半小时的", 32), ("刚跑起来的", 2)):
+            t = PublishTask(
+                name=name, platform="douyin", publish_type="text",
+                target_device_id=dev.id, device_id=dev.id,
+                status=TaskStatus.RUNNING,
+                started_at=now - timedelta(minutes=ago_min),
+                # ⚠ updated_at 是"刚刚"——模拟 Agent 一直在续租约
+                updated_at=now,
+                lease_expires_at=now + timedelta(minutes=5),
+            )
+            session.add(t)
+            session.commit()
+            session.refresh(t)
+            session.add(ExecutionLog(
+                task_id=t.id, device_id=dev.id, level="info", step="publishing",
+                message="内容已就绪，自动点击发布",
+                created_at=now - timedelta(minutes=ago_min),
+            ))
+            session.commit()
+            made.append(t.id)
+        dev.current_task_id = made[0]
+        session.add(dev)
+        session.commit()
+        dev_id = dev.id
+
+        try:
+            assert fail_stalled_tasks(session) == 1, "只该收掉卡了 32 分钟的那条"
+            with Session(engine) as s2:
+                dead = s2.get(PublishTask, made[0])
+                alive = s2.get(PublishTask, made[1])
+                assert dead.status == TaskStatus.FAILED
+                assert "没有任何动静" in (dead.error_message or "")
+                assert "32 分钟" in (dead.error_message or "")
+                # 手机必须被让出来，否则整条队列（含群发）继续堵着
+                d = s2.get(Device, dev_id)
+                assert d.current_task_id is None and d.status == DeviceStatus.ONLINE
+                # 刚跑起来的那条不能动
+                assert alive.status == TaskStatus.RUNNING
+        finally:
+            with Session(engine) as s2:
+                for tid in made:
+                    for lg in s2.exec(
+                        select(ExecutionLog).where(ExecutionLog.task_id == tid)
+                    ).all():
+                        s2.delete(lg)
+                    t = s2.get(PublishTask, tid)
+                    if t:
+                        s2.delete(t)
+                d = s2.get(Device, dev_id)
+                if d:
+                    s2.delete(d)
+                s2.commit()
