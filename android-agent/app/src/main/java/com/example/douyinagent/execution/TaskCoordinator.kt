@@ -64,10 +64,11 @@ class TaskCoordinator(
             // timers so the screenshot waits for the REAL published frame.
             // Guard with a counter so a stuck sheet can't loop forever.
             if (!resultShotTaken && declarationDismissed < 3) {
-                val declRoot = actions.root()
-                if (actions.hasText(declRoot, "需声明") || actions.hasText(declRoot, "添加声明")) {
-                    val tapped = actions.clickAnyText(declRoot, listOf("发布笔记")) ||
-                        actions.tapByText(declRoot, listOf("发布笔记"))
+                // 同上：弹层是独立窗口，必须跨窗口找
+                if (actions.textsMatchingAnyWindow("需声明").isNotEmpty() ||
+                    actions.textsMatchingAnyWindow("添加声明").isNotEmpty()
+                ) {
+                    val tapped = actions.clickTextAnyWindow(listOf("发布笔记"))
                     if (tapped) {
                         declarationDismissed += 1
                         publishTappedAt = now
@@ -78,12 +79,20 @@ class TaskCoordinator(
                 // 抖音 interposes a "为作品添加自主声明" sheet on 发作品. We don't add a
                 // 声明 → tap the top option「无需添加自主声明」then「发作品」(both are
                 // visible together in the sheet, so one pass works; retries next tick).
-                if (actions.hasText(declRoot, "自主声明")) {
-                    actions.clickAnyText(declRoot, listOf("无需添加自主声明")) ||
-                        actions.tapByText(declRoot, listOf("无需添加自主声明"))
-                    val r2 = actions.root()
-                    val tapped = actions.clickAnyText(r2, listOf("发作品")) ||
-                        actions.tapByText(r2, listOf("发作品"))
+                // ⚠ **必须跨窗口找**。这个声明面板是一个**独立窗口**，不在
+                // `rootInActiveWindow` 里 —— 只看 declRoot 的话 hasText 永远是 false，
+                // 于是这段处理一次都不会执行，任务就永远停在面板上。
+                //
+                // 2026-09-09 云机6015：连着三条任务卡死在这儿，一整天 0 篇。
+                // uiautomator dump（会 dump 所有窗口）能看到「为作品添加自主声明 /
+                // 无需添加自主声明 / …/ 发作品」，而 Agent 自己"看不见"。
+                //
+                // 这是同一个坑的第三次 —— `clickTextAnyWindow` 当初就是为
+                // @ 选择器那个浮层加的，注释里写得很清楚，这里却还在用单窗口版本。
+                if (actions.textsMatchingAnyWindow("自主声明").isNotEmpty()) {
+                    actions.clickTextAnyWindow(listOf("无需添加自主声明"))
+                    Thread.sleep(400)
+                    val tapped = actions.clickTextAnyWindow(listOf("发作品"))
                     if (tapped) {
                         declarationDismissed += 1
                         publishTappedAt = now
@@ -360,9 +369,38 @@ class TaskCoordinator(
             )
         } else {
             reporter.status("running", "publishing", 98, "内容已就绪，自动点击发布")
-            val r = actions.root()
-            actions.clickAnyText(r, Selectors.current.publishButtons) ||
-                actions.tapByText(r, Selectors.current.publishButtons)
+            // ⚠ **必须看返回值**。这一下以前是
+            //     `clickAnyText(...) || tapByText(...)`
+            // 结果丢掉不管 —— 点没点中都当点中了，然后 moveTo(VERIFYING_RESULT)
+            // 去等一个永远不会来的发布成功页。任务就那么挂着，直到别的东西
+            // 顺手把它带走，而报出来的原因和真实情况毫无关系。
+            //
+            // 2026-09-09 云机6015 连着两条任务这样卡住：截图停在发布确认页、
+            // 「发作品」按钮还在，一整天 0 篇。
+            //（同一类错误在群发那条路上也犯过一次，见 openMessageList 的注释。）
+            //
+            // 重试三次并且每次**重新读一遍控件树**：上一帧的节点可能已经失效，
+            // 拿旧的 root 点必然点空。
+            var tapped = false
+            for (attempt in 0 until 3) {
+                val r = actions.root()
+                tapped = actions.clickAnyText(r, Selectors.current.publishButtons) ||
+                    actions.tapByText(r, Selectors.current.publishButtons)
+                if (tapped) break
+                Thread.sleep(1200)
+            }
+            if (!tapped) {
+                // 说清楚是"没点到按钮"，不是"发布失败" —— 前者要查选择器和页面，
+                // 后者要查账号，处理动作完全不同。
+                val seen = actions.textsMatching(actions.root(), "发")
+                    .take(6).joinToString("/")
+                reporter.status(
+                    "failed", "publish_button_missing", 0,
+                    "没能点到「${Selectors.current.publishButtons.firstOrNull() ?: "发布"}」" +
+                        "，试了 3 次。当前屏上带「发」的文字：[$seen]",
+                )
+                return
+            }
             publishTappedAt = System.currentTimeMillis()
             state.moveTo(ExecutionStep.VERIFYING_RESULT)
         }

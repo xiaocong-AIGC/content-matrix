@@ -744,6 +744,9 @@ def reclaim_expired_tasks(session: Session) -> int:
 # 正常发布每一步之间是秒级的（实测 +0/2/3/5/9/12/22 秒走完全程），
 # 10 分钟一声不吭只有一种解释：它不动了。
 STALLED_AFTER = timedelta(minutes=10)
+# 这些日志只说明"Agent 还活着"，不说明"任务在往前走"。判卡死时必须排除，
+# 否则一台无障碍反复重连的手机可以让卡死的任务无限续命。
+_NON_PROGRESS_STEPS = ("accessibility_ready", "accessibility_stopped")
 
 
 def fail_stalled_tasks(session: Session) -> int:
@@ -771,9 +774,14 @@ def fail_stalled_tasks(session: Session) -> int:
     ).all()
     failed = 0
     for task in tasks:
+        # ⚠ 无障碍连接/断开的日志**不算进展**。它们和任务走到哪一步无关，
+        # 而这类事件在有些手机上每隔几分钟就来一次 —— 拿它们当"还活着"的证据，
+        # 卡死的任务就永远判不出来（实测：任务停在发布页 12 分钟没动，
+        # 却因为一条「无障碍服务已连接」把计时器重置了）。
         last_log = session.exec(
             select(ExecutionLog)
             .where(ExecutionLog.task_id == task.id)
+            .where(ExecutionLog.step.notin_(_NON_PROGRESS_STEPS))
             .order_by(ExecutionLog.created_at.desc())
         ).first()
         # 没有日志的用 started_at 兜底；两个都没有就跳过（还没真正开始）

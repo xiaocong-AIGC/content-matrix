@@ -109,6 +109,14 @@ def test_卡在running的任务要被收掉():
             ))
             session.commit()
             made.append(t.id)
+        # 无障碍连接/断开的日志不该算进展 —— 给「卡了半小时的」补一条刚刚的，
+        # 它仍然必须被判定为卡死
+        session.add(ExecutionLog(
+            task_id=made[0], device_id=dev.id, level="info",
+            step="accessibility_ready", message="无障碍服务已连接",
+            created_at=now,
+        ))
+        session.commit()
         dev.current_task_id = made[0]
         session.add(dev)
         session.commit()

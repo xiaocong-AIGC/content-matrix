@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.douyinagent"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.8.2"
+        versionCode = 10
+        versionName = "0.8.4"
     }
 
     buildFeatures {
