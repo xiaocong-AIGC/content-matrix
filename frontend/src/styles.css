@@ -5227,6 +5227,29 @@ main {
   border-collapse: collapse;
   font-size: var(--fs-read);
 }
+/* 表头跟着滚。自动发布/自动推送/自动生成这三页的表可以有几十行，
+   滚到第 20 行时「账号 / 城市 / 今天 / 状态」全滚出屏幕，剩下一片数字
+   没人知道哪列是哪列。（实测 28 行的表滚到第 20 行，表头在 -958px。）
+
+   ⚠ 三个必要条件，少一个就不生效：
+   ① border-collapse 必须是 separate —— collapse 模式下 th 的边框不属于它自己，
+      吸顶时边框会留在原地，表头看起来是「浮空的一行字」；
+   ② th 必须有不透明背景，否则下面的行会从它身下穿过去；
+   ③ 从表格到滚动容器之间不能有 overflow:hidden（已确认没有）。 */
+.supply-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.supply-table thead th {
+  position: sticky;
+  top: var(--stick-head-top);
+  z-index: var(--z-sticky-head);
+  background: var(--paper);
+  /* collapse 换成 separate 之后，原来 td 的下边框还在，但表头底下那道线
+     要自己画 —— 否则吸顶时表头和内容之间没有分隔。 */
+  box-shadow: inset 0 -1px 0 var(--line-strong);
+}
+
 .supply-table th {
   padding: var(--sp-3) var(--sp-4);
   text-align: left;

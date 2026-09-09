@@ -213,6 +213,40 @@ export default function App() {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
+  // 吸顶偏移量按**实测**算，不写死。
+  //
+  // `--stick-head-top` 原来是 `--topbar-h + --hero-h` = 94 + 124 = 218px，
+  // 而 hero 早就改成了会长高的 min-height（宽屏下标题用 clamp，实测 162px）。
+  // 结果是任何按这个数吸顶的表头都会被 hero 压住一截 —— 数字对不上现实。
+  //
+  // 每页的 hero 高度不一样、断点之间也不一样，所以只能量。ResizeObserver
+  // 覆盖三种变化：换页面、改窗口宽度、hero 自己的内容变多（比如多一条警示）。
+  useEffect(() => {
+    const root = document.documentElement;
+    const measure = () => {
+      const topbar = document.querySelector(".topbar");
+      const hero = document.querySelector(".catalog-hero");
+      const top = topbar ? topbar.getBoundingClientRect().height : 0;
+      // 只有**吸顶的** hero 才占位置；窄屏下它是 static，不参与偏移
+      const heroH =
+        hero && getComputedStyle(hero).position === "sticky"
+          ? hero.getBoundingClientRect().height
+          : 0;
+      root.style.setProperty("--stick-head-top", `${Math.round(top + heroH)}px`);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    const topbar = document.querySelector(".topbar");
+    const hero = document.querySelector(".catalog-hero");
+    if (topbar) ro.observe(topbar);
+    if (hero) ro.observe(hero);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [view]);
+
   const refresh = useCallback(async () => {
     try {
       const [taskItems, deviceItems, stats] = await Promise.all([
