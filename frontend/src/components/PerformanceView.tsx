@@ -183,6 +183,24 @@ function PerfBoard({
                     <time className="perf-time">{fmtDate(r.captured_at)}</time>
                   ) : null}
                 </div>
+                {r.account_nickname || r.published_at ? (
+                  <div className="perf-origin">
+                    {r.account_nickname ? (
+                      <span className="perf-origin-who">
+                        {r.account_nickname}
+                        {r.city ? <em>{r.city}</em> : null}
+                      </span>
+                    ) : null}
+                    {r.published_at ? (
+                      <span className="perf-origin-when">
+                        {fmtDate(r.published_at)} 发布
+                        {typeof r.age_days === "number" ? (
+                          <em>{r.age_days === 0 ? "今天" : `${r.age_days} 天`}</em>
+                        ) : null}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
                 {r.body ? <p className="perf-body">{r.body}</p> : null}
                 {r.topics && r.topics.length ? (
                   <div className="perf-topics">
@@ -198,6 +216,13 @@ function PerfBoard({
                     <b>{r.engagement}</b>
                     <small>互动</small>
                   </span>
+                  {/* 评论排在阅读前面：它是我们判断内容好坏的主指标
+                      （头部内容评论数常年高于点赞，见效果榜任意一屏），
+                      阅读量是对外汇报口径，放次位。 */}
+                  <span className="perf-metric">
+                    <b><MessageCircle size={14} /> {r.comments}</b>
+                    <small>评论</small>
+                  </span>
                   <span className="perf-metric">
                     <b><Eye size={14} /> {r.views}</b>
                     <small>阅读</small>
@@ -209,10 +234,6 @@ function PerfBoard({
                   <span className="perf-metric">
                     <b><Star size={14} /> {r.collects}</b>
                     <small>收藏</small>
-                  </span>
-                  <span className="perf-metric">
-                    <b><MessageCircle size={14} /> {r.comments}</b>
-                    <small>评论</small>
                   </span>
                 </div>
               </article>

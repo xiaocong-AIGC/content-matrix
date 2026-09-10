@@ -266,6 +266,13 @@ export interface PerformanceRow {
   comments: number;
   engagement: number;
   captured_at: string;
+  // 「谁发的、哪天发的」——榜上只有标题和数字时，看不出一条数字低是内容不行
+  // 还是昨天刚发；也没法把爆款归到某个号头上。对不上发布任务的行是 null。
+  device_name?: string | null;
+  account_nickname?: string | null;
+  city?: string | null;
+  published_at?: string | null;
+  age_days?: number | null;
 }
 export const contentPerformance = () =>
   api<PerformanceRow[]>("/content/performance");

@@ -4614,6 +4614,20 @@ main {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .perf-time { margin-left: auto; flex-shrink: 0; font-size: var(--fs-aux); color: var(--muted); }
+/* 「谁发的 · 哪天发的」—— 榜上只有标题和数字时，一条数字低到底是内容不行
+   还是昨天刚发，看不出来；爆款也归不到某个号头上。
+   刻度全部沿用现成的（--fs-aux / --muted / --sp-3），不新造。 */
+.perf-origin {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-5);
+  font-size: var(--fs-aux); color: var(--muted);
+}
+.perf-origin-who { font-weight: 600; color: var(--ink-soft); }
+/* 城市和天数是附注，比它挂着的那个词再弱一档 */
+.perf-origin em {
+  margin-left: var(--sp-3); font-style: normal; font-weight: 400; color: var(--muted);
+}
+.perf-origin-who em::before, .perf-origin-when em::before { content: "·"; margin-right: var(--sp-3); }
+
 .perf-body {
   margin: 0; color: var(--ink-soft); font-size: var(--fs-read); line-height: 1.6;
   white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 2;

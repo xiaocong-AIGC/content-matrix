@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 from sqlmodel import Session, func, select
 
@@ -134,9 +135,42 @@ def content_performance(session: Session, limit: int = 1000) -> list[dict]:
                 select(ContentItem).where(ContentItem.id.in_(list(latest)))
             ).all()
         }
+    # 「是哪个号发的、哪天发的」—— 榜上只有标题和数字时，运营没法回答
+    # 「这条是谁发的」「是不是刚发的所以数字还低」，只能一条条点进去看。
+    # 三张表一次捞完，同样别在循环里查。
+    from app.models.entities import Device, DeviceAccount
+
+    tasks: dict[int, PublishTask] = {}
+    if latest:
+        tasks = {
+            t.content_id: t
+            for t in session.exec(
+                select(PublishTask)
+                .where(PublishTask.content_id.in_(list(latest)))
+                .where(PublishTask.status == TaskStatus.SUCCEEDED)
+                .order_by(PublishTask.finished_at)
+            ).all()
+        }
+    device_ids = {t.device_id for t in tasks.values() if t.device_id}
+    device_ids |= {m.device_id for m in latest.values() if m.device_id}
+    devices = {
+        d.id: d
+        for d in session.exec(select(Device).where(Device.id.in_(device_ids))).all()
+    } if device_ids else {}
+    accounts: dict[tuple[int, str], DeviceAccount] = {}
+    if device_ids:
+        accounts = {
+            (a.device_id, a.platform): a
+            for a in session.exec(
+                select(DeviceAccount).where(DeviceAccount.device_id.in_(device_ids))
+            ).all()
+        }
     rows = []
     for cid, m in latest.items():
         content = contents.get(cid)
+        task = tasks.get(cid)
+        dev = devices.get(task.device_id if task else m.device_id)
+        acc = accounts.get(((task.device_id if task else m.device_id), m.platform))
         rows.append(
             {
                 "content_id": cid,
@@ -152,10 +186,32 @@ def content_performance(session: Session, limit: int = 1000) -> list[dict]:
                 "comments": m.comments,
                 "engagement": m.likes + m.collects + m.comments,
                 "captured_at": m.captured_at,
+                # ── 「谁发的、哪天发的」 ──────────────────────────────
+                # ⚠ 账号信息是**当下反查**的，不是发布当时的快照。刷机重登
+                # 换了号，`upsert_account` 会就地覆盖 nickname（accounts.py），
+                # 历史数据就会挂到新号名下。要彻底解决得在发布时存一份快照，
+                # 那是另一件事；这里先把「今天这台机是谁」如实显示出来。
+                "device_name": (dev.name if dev else None),
+                "account_nickname": (acc.nickname if acc else None),
+                "city": (acc.city if acc else (content.city if content else None)),
+                "published_at": (task.finished_at if task else
+                                 (content.published_at if content else None)),
+                # 发出去多少天了 —— 新发的数字低是正常的，榜上必须能看出来
+                "age_days": (
+                    (utcnow() - _aware(task.finished_at)).days
+                    if task and task.finished_at else
+                    ((utcnow() - _aware(content.published_at)).days
+                     if content and content.published_at else None)
+                ),
             }
         )
     rows.sort(key=lambda r: r["engagement"], reverse=True)
     return rows[:limit]
+
+
+def _aware(moment: datetime) -> datetime:
+    """库里存的是 naive UTC，减之前先补上时区，否则 TypeError。"""
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
 def top_posts_for_remix(session: Session, platform: str | None, limit: int = 10) -> list[dict]:
