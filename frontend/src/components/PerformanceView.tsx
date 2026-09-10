@@ -159,9 +159,9 @@ function PerfBoard({
   const paged = usePaged(rows, 6);
   const boardViews = rows.reduce((s, r) => s + r.views, 0);
   const boardEng = rows.reduce((s, r) => s + r.engagement, 0);
-  // 「二选一」是唯一被实测证明稳定更好的写法，而它一直是我们写得最少的
-  // 一类。榜上不把这句话说出来，运营看一屏卡片也得不出这个结论。
-  // ⚠ 倍数由**后端在全量上**算好（summary prop），这里绝不自己拿 rows 算 ——
+  // 榜上这一句是页面里唯一「告诉你该做什么」的地方，所以只说结论和动作，
+  // 不解释「二选一」是什么、更不解释我们怎么算的 —— 那是文档里的事。
+  // ⚠ 倍数由**后端在全量上**算好（summary prop），这里绝不自己拿 rows 算：
   // rows 是先按互动排序再截断的，在它上面算倍数得到的是选样偏差。
   return (
     <section className={`perf-board board-${platform}`}>
@@ -188,14 +188,9 @@ function PerfBoard({
 
       {summary ? (
         <p className="perf-insight">
-          <b>「二选一」写法</b>的评论中位数是其余写法的
-          <b> {summary.ratio} 倍</b>（{summary.best_median_comments} 比{" "}
-          {summary.rest_median_comments}），而它只占已发内容的{" "}
-          <b>{summary.best_share}%</b>。
-          <em>
-            就是给两个选项让人替他选，比如「南山还是龙华」。
-            按全部 {summary.best_n + summary.rest_n} 条已发内容算，不是按这一屏。
-          </em>
+          让人二选一的内容，评论比别的多 <b>{summary.ratio} 倍</b>
+          （中位 {summary.best_median_comments} 条，其余 {summary.rest_median_comments} 条）。
+          这类只占 <b>{summary.best_share}%</b>，可以多写点。
         </p>
       ) : null}
 
