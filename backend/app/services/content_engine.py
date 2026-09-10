@@ -64,8 +64,11 @@ def _best_dup(body: str, corpus: list[tuple[str, str]]) -> tuple[float, str]:
 
 # Admin-editable AI provider config (AppSetting overrides the env). Operators
 # never see it; only 管理员 via /content/engine/aiconfig. Key = the API key,
-# base_url = the OpenAI-compatible endpoint (e.g. an enterprise gateway like
-# https://chatgpt.58corp.com/api/v3), model = the model id.
+# base_url = any OpenAI-compatible endpoint (a public cloud one, or a company
+# gateway on the intranet), model = the model id.
+#
+# ⚠ 这个仓库是**公开**的：具体的内网网关域名、模型 id、密钥一律不写进代码和
+# 界面文案，只放 backend/.env（已 gitignore）或管理员在界面上填。
 DEEPSEEK_KEY_SETTING = "deepseek_api_key"
 DEEPSEEK_URL_SETTING = "deepseek_base_url"
 DEEPSEEK_MODEL_SETTING = "deepseek_model"

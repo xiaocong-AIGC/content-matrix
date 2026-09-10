@@ -292,15 +292,14 @@ export function AIStudioView() {
           </summary>
           <p className="ai-prompt-hint">
             管理员配置 AI 提供方（保存后覆盖环境变量，运营角色看不到）。
-            <b>接口地址填 OpenAI 兼容网关即走企业网关</b>，例如
-            <code> https://chatgpt.58corp.com/api/v3</code>；密钥当前：
-            <code>{keyInfo.masked || "无"}</code>。
+            <b>接口地址填任意 OpenAI 兼容网关</b>，公司内网网关和公有云都行；
+            密钥当前：<code>{keyInfo.masked || "无"}</code>。
           </p>
           <label className="ai-field">
             接口地址（base_url，OpenAI 兼容）
             <input
               type="text"
-              placeholder="https://chatgpt.58corp.com/api/v3 或 https://api.deepseek.com"
+              placeholder="https://api.deepseek.com 或公司内网网关地址"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
             />
