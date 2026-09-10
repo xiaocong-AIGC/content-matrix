@@ -25,7 +25,9 @@ def _tokens_text(session: Session) -> str:
 
 
 def _state(session: Session) -> dict:
-    gaps = content_supply.city_gaps(session)
+    # 显示要看到所有有账号的城市，不只是有缺口的 —— 否则唯一在跑的那个城市
+    # 整行都是破折号（见 city_gaps 里的注释）。生成侧仍只看有缺口的。
+    gaps = content_supply.city_gaps(session, include_ok=True)
     return {
         "enabled": content_supply.enabled(session),
         "enabled_cities": sorted(content_supply.enabled_cities(session)),
@@ -36,7 +38,10 @@ def _state(session: Session) -> dict:
         "city_tokens_raw": _tokens_text(session),
         "city_tokens": content_supply.city_tokens(session),
         "gaps": gaps,
-        "short_total": sum(g["short"] for g in gaps),
+        # ⚠ 只加正数。`include_ok=True` 之后 gaps 里会有 short 为 0 或负数的城市
+        # （库存超过目标），直接求和会把首屏那个大数字变成 -6 —— 「还差 -6 篇」
+        # 是句没有意义的话，而且库存充裕反而显示成红色告急的反面。
+        "short_total": sum(max(g["short"], 0) for g in gaps),
         "last_run": settings_store.get(session, "supply:last_run", "") or None,
     }
 

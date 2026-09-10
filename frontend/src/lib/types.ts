@@ -190,7 +190,11 @@ export interface SupplyGap {
   accounts: number;
   have: number;
   need: number;
+  /** 正数 = 还差几篇；0 或负数 = 够用（后端现在把够用的城市也返回） */
   short: number;
+  /** 按当前消耗速度还能发几天 —— 比「还差几篇」更能让人当场判断松紧 */
+  days_left?: number | null;
+  per_day?: number | null;
 }
 
 export interface SupplyState {

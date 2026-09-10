@@ -266,11 +266,23 @@ export function SupplyView({ devices, onNotice }: Props) {
                   <td>{gap ? gap.accounts : "—"}</td>
                   <td>{gap ? gap.have : "—"}</td>
                   <td>{gap ? gap.need : "—"}</td>
+                  {/* 够用的城市以前整行都是破折号 —— 而唯一真正在跑的那个城市
+                      恰好一直是「够用」，于是页面上一个数字都看不到。
+                      现在够用也给出「还够发几天」，压线和宽裕一眼能分开。 */}
                   <td>
-                    {gap ? (
+                    {!gap ? (
+                      "—"
+                    ) : gap.short > 0 ? (
                       <b className="supply-short">{gap.short}</b>
                     ) : (
-                      <span className="slot-state s-sent">够用</span>
+                      <span className="slot-state s-sent">
+                        够用
+                        {typeof gap.days_left === "number" ? (
+                          <em className="supply-days">
+                            还够发 {gap.days_left} 天
+                          </em>
+                        ) : null}
+                      </span>
                     )}
                   </td>
                   <td>

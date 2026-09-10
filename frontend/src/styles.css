@@ -5278,6 +5278,12 @@ main {
   border-collapse: separate;
   border-spacing: 0;
 }
+/* 「够用」旁边那句「还够发 N 天」：附注，比它挂着的词弱一档 */
+.supply-days {
+  margin-left: var(--sp-3); font-style: normal; font-weight: 400;
+  font-size: var(--fs-aux); color: var(--muted);
+}
+
 .supply-table thead th {
   position: sticky;
   top: var(--stick-head-top);

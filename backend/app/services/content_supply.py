@@ -81,11 +81,19 @@ def batch_cap(session: Session) -> int:
 # ---------------------------------------------------------------------------
 # 缺口
 # ---------------------------------------------------------------------------
-def city_gaps(session: Session) -> list[dict]:
+def city_gaps(session: Session, include_ok: bool = False) -> list[dict]:
     """每个城市还差多少篇才够 min_days 天。
 
     分母只算**还在这套系统里跑的号**（最近 48 小时发过的）—— 和通知那边同一个口径，
     否则会为 8 个走别的方式发布的号凭空生成内容。
+
+    `include_ok=True` 时把**够用的城市也带上**（`short` 为 0 或负数）。
+
+    ⚠ 为什么需要这个开关：默认只返回有缺口的城市，于是界面上唯一真正在跑的
+    那个城市（深圳，全矩阵仅有的 5 个自动发布账号都在那）**整行都是破折号** ——
+    库存 45 篇、正好压在 45 篇的线上，而运营在页面上一个数字也看不到，
+    只看到「够用」。等它掉下去变成有缺口才第一次显示数字，那时已经晚了。
+    生成用的还是只看有缺口的那份（`run_once` 用默认值），显示用这一份。
     """
     from app.services.notify_sweep import _accounts_by_city, NO_CITY
     from app.services.notify_sweep import daily_target, _expected_for
@@ -106,23 +114,31 @@ def city_gaps(session: Session) -> list[dict]:
     for city, members in buckets.items():
         if city == NO_CITY:
             continue          # 没设城市的号只能吃通用池，不为它单独生成
-        need = sum(_expected_for(a, target) for a in members) * days
+        per_day = sum(_expected_for(a, target) for a in members)
+        need = per_day * days
         have = stock.get(city, 0)
-        if have < need:
+        if have < need or include_ok:
             gaps.append({
                 "city": city,
                 "accounts": len(members),
                 "have": have,
                 "need": need,
                 "short": need - have,
+                # 「够发几天」比「还差几篇」更能让人当场判断要不要动手 ——
+                # 45 篇听不出松紧，「够发 3 天」一听就知道。
+                "days_left": round(have / per_day, 1) if per_day else None,
+                "per_day": per_day,
             })
     # 通用池按"所有城市共用"算一份保底
     total_heads = sum(len(v) for k, v in buckets.items() if k != NO_CITY)
     generic_need = max(total_heads, 1) * days // 2      # 通用只做一半的保底量
-    if shared < generic_need:
+    if shared < generic_need or include_ok:
+        generic_per_day = generic_need / days if days else 0
         gaps.append({
             "city": "通用", "accounts": total_heads,
             "have": shared, "need": generic_need, "short": generic_need - shared,
+            "days_left": round(shared / generic_per_day, 1) if generic_per_day else None,
+            "per_day": round(generic_per_day, 1),
         })
     gaps.sort(key=lambda g: -g["short"])
     return gaps
