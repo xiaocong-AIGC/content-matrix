@@ -23,6 +23,7 @@ from app.schemas.dto import (
     ContentCreate,
     ContentUpdate,
     DraftAccept,
+    DraftReject,
     DraftUpdate,
     GenerateDraftsRequest,
     PromptPresetUpsert,
@@ -63,6 +64,8 @@ def create(payload: ContentCreate, session: Session = Depends(get_session)):
         city=payload.city.strip() or "通用",
         platform=payload.platform.strip() or "douyin",
         status=ContentStatus.PENDING,
+        # 人工新建的内容没有草稿、也没有提示词版本 —— draft_id 和
+        # prompt_version_id 保持为空，分析时正是靠这个把它和机器写的分开。
     )
     session.add(item)
     session.commit()
@@ -411,6 +414,10 @@ def update_draft(
     if payload.title is not None:
         draft.title = payload.title
     if payload.body is not None:
+        # 老草稿（这个字段上线之前生成的）original_body 是空的，第一次被改
+        # 之前把当时的正文存下来。新草稿落库时就存好了，这里不会覆盖。
+        if not draft.original_body:
+            draft.original_body = draft.body
         draft.body = payload.body
     if payload.topics is not None:
         draft.topics_json = json.dumps(payload.topics, ensure_ascii=False)
@@ -443,6 +450,9 @@ def accept_draft(
         city=payload.city.strip() or "通用",
         platform=draft.platform,
         status=ContentStatus.PENDING,
+        # 溯源：这条内容是哪条草稿、哪版提示词来的
+        draft_id=draft.id,
+        prompt_version_id=draft.prompt_version_id,
     )
     session.add(item)
     session.commit()
@@ -459,11 +469,18 @@ def accept_draft(
 
 
 @router.post("/drafts/{draft_id}/reject")
-def reject_draft(draft_id: int, session: Session = Depends(get_session)):
+def reject_draft(
+    draft_id: int,
+    payload: DraftReject | None = None,
+    session: Session = Depends(get_session),
+):
     draft = session.get(ContentDraft, draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="草稿不存在")
     draft.status = "rejected"
+    # 理由可空（前端老版本不传），但传了就收下 —— 它是"模型老犯什么错"的唯一来源
+    if payload and payload.reason.strip():
+        draft.reject_reason = payload.reason.strip()[:200]
     draft.updated_at = utcnow()
     session.add(draft)
     session.commit()

@@ -138,6 +138,10 @@ class ContentItem(SQLModel, table=True):
     )
     published_task_id: int | None = Field(default=None, index=True)
     published_at: datetime | None = None
+    # 从哪条草稿来的、那条草稿用的哪版提示词。人工新建/CSV 导入的内容
+    # 两个都是空 —— 分析时正是靠这个把「机器写的」和「人写的」分开。
+    draft_id: int | None = Field(default=None, index=True)
+    prompt_version_id: int | None = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -167,8 +171,42 @@ class ContentDraft(SQLModel, table=True):
     # 查重：与已有内容/草稿正文的最高相似度(0~1)，及最相似的来源描述。
     dup_score: float = Field(default=0.0)
     dup_of: str = Field(default="", max_length=200)
+    # 哪一版提示词写的 —— 没有它，「改了提示词有没有变好」永远无法验证。
+    prompt_version_id: int | None = Field(default=None, index=True)
+    # 人第一次动这条草稿之前的原文。运营改过之后再拿它评价提示词，
+    # 评的就是「模型 + 人」的合成结果，不是提示词本身。
+    original_body: str = Field(default="", sa_column=Column(Text))
+    # 为什么被拒。以前机器闸的理由挤在 dup_of 里（那栏本来是查重来源），
+    # 人工拒绝则什么都不记 —— 于是「模型老犯什么错」无从统计。
+    reject_reason: str = Field(default="", max_length=200)
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class PromptVersion(SQLModel, table=True):
+    """一次生成**实际用过**的 system prompt 的不可变快照。
+
+    按正文的 sha256 寻址：同一段提示词只存一行，改一个字就是新的一行。
+
+    ⚠ 为什么不是「版本表 + 一根活动指针」：这张表的全部价值是回答
+    「这条内容是哪版提示词写的」。指针记的是「谁声明当前用哪版」，会和现实
+    漂开（有预设、有全局、还有人临时改一版就生成一批）；按内容寻址记的是
+    **真正发出去的那段话**，漂不开。副作用也是对的：全局提示词和某个预设
+    的文案一模一样时，它们本来就是同一版，共用一行。
+
+    今天这条链是断的 —— 草稿不记用了哪段提示词，于是「上周改的那句到底有没有
+    用」永远无法回答。这是盘点出的 13 处断点里**唯一时间不可逆**的一处：
+    没记下来的那些，事后补不回来。
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    sha256: str = Field(max_length=64, index=True, unique=True)
+    text: str = Field(default="", sa_column=Column(Text))
+    # 第一次见到它是从哪来的："global" 或 "preset:12"。仅供人看，不参与身份。
+    first_seen_in: str = Field(default="global", max_length=40)
+    # 人给的名字，比如「加了痛点开头那版」。可空，随时能补。
+    label: str = Field(default="", max_length=120)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
 class ConsoleToken(SQLModel, table=True):

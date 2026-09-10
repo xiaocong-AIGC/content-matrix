@@ -192,6 +192,17 @@ class DraftUpdate(BaseModel):
     platform: str | None = Field(default=None, max_length=16)
 
 
+class DraftReject(BaseModel):
+    """拒绝一条草稿，可以说明为什么。
+
+    理由不是给人看的备注，是**统计口径**：模型老犯什么错，只有把拒绝理由
+    收上来才数得出来。以前人工拒绝什么都不记，机器闸的理由挤在 dup_of 里
+    （那栏本来是查重来源）。
+    """
+
+    reason: str = Field(default="", max_length=200)
+
+
 class DraftAccept(BaseModel):
     """Accept a draft into the content pool, optionally tagging a city."""
 

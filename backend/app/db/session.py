@@ -146,6 +146,13 @@ def create_db_and_tables() -> None:
                 connection.execute(
                     text("ALTER TABLE contentitem ADD COLUMN platform VARCHAR(16) DEFAULT 'douyin'")
                 )
+        for name, ddl in {"draft_id": "INTEGER", "prompt_version_id": "INTEGER"}.items():
+            if name not in content_columns:
+                with engine.begin() as connection:
+                    connection.execute(
+                        text(f"ALTER TABLE contentitem ADD COLUMN {name} {ddl}")
+                    )
+
 
     if "contentdraft" in inspector.get_table_names():
         draft_columns = {
@@ -157,6 +164,10 @@ def create_db_and_tables() -> None:
             "cost_cny": "FLOAT DEFAULT 0",
             "dup_score": "FLOAT DEFAULT 0",
             "dup_of": "VARCHAR(200) DEFAULT ''",
+            # 提示词溯源（见 PromptVersion 的注释）
+            "prompt_version_id": "INTEGER",
+            "original_body": "TEXT DEFAULT ''",
+            "reject_reason": "VARCHAR(200) DEFAULT ''",
         }
         for name, ddl in draft_extra.items():
             if name not in draft_columns:
@@ -202,6 +213,23 @@ def create_db_and_tables() -> None:
                 connection.execute(
                     text(f"ALTER TABLE device ADD COLUMN {name} {ddl}")
                 )
+
+    # ⚠ **必须放在所有 ALTER 之后。** 放在中间的话，后面那些块才加的列，
+    # 轮到建索引时还不存在，会被静默跳过 —— 我第一版就放在 contentitem 块里，
+    # 在生产库副本上跑出来 contentdraft 的索引没建上。
+    #
+    # ⚠ **ALTER 加的列不会自动建索引。** SQLModel 的 `index=True` 只在
+    # `create_all` 建表那一次生效；后来 ALTER 上去的列，模型里写了也没有。
+    # 库里 contentitem 的 city / platform 就是这样 —— 标了 index=True，
+    # 实际一个索引都没有。新加的溯源列要按 prompt_version_id 分组统计
+    # （「哪版提示词写的内容表现更好」），没索引就是全表扫。
+    _ensure_indexes(
+        ("ix_contentdraft_prompt_version_id", "contentdraft", "prompt_version_id"),
+        ("ix_contentitem_draft_id", "contentitem", "draft_id"),
+        ("ix_contentitem_prompt_version_id", "contentitem", "prompt_version_id"),
+        ("ix_contentitem_city", "contentitem", "city"),
+        ("ix_contentitem_platform", "contentitem", "platform"),
+    )
 
     _backfill_device_accounts()
 
@@ -270,3 +298,26 @@ def _backfill_device_accounts() -> None:
 def get_session():
     with Session(engine) as session:
         yield session
+
+
+
+def _ensure_indexes(*specs: tuple[str, str, str]) -> None:
+    """幂等地补索引。`CREATE INDEX IF NOT EXISTS` SQLite 原生支持。
+
+    只对已存在的表动手 —— 全新的库由 `create_all` 建索引，这里是给
+    「先建表、后 ALTER 加列」的老库补课。
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    for index_name, table_name, column in specs:
+        if table_name not in existing_tables:
+            continue
+        if column not in {c["name"] for c in inspector.get_columns(table_name)}:
+            continue
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS {index_name} "
+                    f"ON {table_name} ({column})"
+                )
+            )

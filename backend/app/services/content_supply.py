@@ -278,9 +278,9 @@ def run_once(session: Session, now: datetime | None = None) -> dict:
             )
             if not ok:
                 draft.status = "rejected"
-                # ContentDraft 没有单独的驳回理由字段，dup_of 本来就是"为什么被判掉"
-                # 那一栏（原本只写查重来源），这里复用它写机器闸的理由
-                draft.dup_of = why[:200]
+                # 现在有专门的字段了。dup_of 复原成它本来的意思（查重来源），
+                # 否则「模型老犯什么错」和「跟哪条撞了」永远混在一列里数不清。
+                draft.reject_reason = why[:200]
                 session.add(draft)
                 rejected.append(f"{gap['city']}：{why}")
                 continue
@@ -292,6 +292,10 @@ def run_once(session: Session, now: datetime | None = None) -> dict:
                 city=gap["city"],
                 platform="douyin",
                 status=ContentStatus.PENDING,
+                # 溯源必须走这条路 —— 自动生成是主路径（每天一半以上的内容
+                # 从这里进池，而且不经人手），漏了它等于只给人工那条路记账。
+                draft_id=draft.id,
+                prompt_version_id=draft.prompt_version_id,
             )
             session.add(item)
             session.flush()

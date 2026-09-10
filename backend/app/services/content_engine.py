@@ -6,6 +6,7 @@ build a prompt that extracts the winning structure and asks for K differentiated
 variants → DeepSeek JSON → store as ContentDraft rows for human review.
 """
 
+import hashlib
 import json
 import re
 from difflib import SequenceMatcher
@@ -299,6 +300,34 @@ def preview_prompt(
     }
 
 
+def record_prompt_version(
+    session: Session, text: str, *, first_seen_in: str = "global"
+) -> "PromptVersion | None":
+    """把这次**实际发出去的** system prompt 记成一版，返回它。
+
+    按 sha256 去重：同一段文案只有一行，改一个字就是新的一行。
+    所以调用方不用判断"是不是新版"，直接调，拿 id 挂在草稿上。
+
+    空文案返回 None —— 没发生过的事不记账。
+    """
+    from app.models.entities import PromptVersion
+
+    body = (text or "").strip()
+    if not body:
+        return None
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    existing = session.exec(
+        select(PromptVersion).where(PromptVersion.sha256 == digest)
+    ).first()
+    if existing:
+        return existing
+    version = PromptVersion(sha256=digest, text=body, first_seen_in=first_seen_in[:40])
+    session.add(version)
+    session.commit()
+    session.refresh(version)
+    return version
+
+
 def generate_drafts(
     session: Session,
     *,
@@ -313,10 +342,15 @@ def generate_drafts(
     # An explicit preset wins; else legacy source_content_ids; else default logic.
     if preset_id is not None:
         system, exemplars, raw_samples = _resolve_preset(session, platform, preset_id)
+        prompt_source = f"preset:{preset_id}"
     else:
         system = get_system_prompt(session)
         exemplars = _exemplars(session, platform, source_content_ids)
         raw_samples = None
+        prompt_source = "global"
+    # ⚠ 在调用**之前**记版本。调用失败也要留下"这一版试过"这个事实 ——
+    # 一版提示词老是让模型超时或返回空，那本身就是关于这一版的信息。
+    version = record_prompt_version(session, system, first_seen_in=prompt_source)
     user = _build_user_prompt(exemplars, count, platform, theme, raw_samples)
     # 推理模型先写 reasoning 再写正文，额度不足会导致正文为空（见 deepseek.chat_json）。
     # 按条数放大：思考开销 + 每条约 1200 token 的正文余量。
@@ -340,7 +374,12 @@ def generate_drafts(
         for ex in exemplars
     )
     settings = get_settings()
-    model = settings.deepseek_model
+    # ⚠ 这里以前写的是 `settings.deepseek_model`（env 里的默认值），而真正发起
+    # 调用用的是 `resolve_model(session)`（管理员在界面上配的那个）。于是库里
+    # 95 条草稿全标着 deepseek-v4-flash，实际跑的是 deepseek-v4-pro ——
+    # 而 model 和 cost_cny 正是将来"哪版提示词更划算"的唯一依据，记错了
+    # 整条结论就是错的。
+    model = resolve_model(session)
     # 整批一次 API 调用 → 把 token 与成本平摊到每条草稿，便于在库里逐条/汇总统计。
     valid = [d for d in raw_drafts[:count] if isinstance(d, dict)]
     n = max(1, len(valid))
@@ -378,6 +417,10 @@ def generate_drafts(
             cost_cny=per_cost,
             dup_score=round(score, 4),
             dup_of=label if score >= DUP_WARN else "",
+            prompt_version_id=version.id if version else None,
+            # 落库时原文 == 正文；人改过之后 original_body 保持不变，
+            # 两者一比就知道这条被人动过多少。
+            original_body=body,
         )
         session.add(draft)
         drafts.append(draft)
