@@ -5,6 +5,7 @@ from sqlmodel import Session, func, select
 
 from app.core.enums import TaskStatus
 from app.models.entities import ContentItem, PostMetric, PublishTask, utcnow
+from app.services.content_taxonomy import classify, tier
 
 
 def _match_task(
@@ -168,6 +169,9 @@ def content_performance(session: Session, limit: int = 1000) -> list[dict]:
     rows = []
     for cid, m in latest.items():
         content = contents.get(cid)
+        # 分类看封面。回采到的、对不上内容库的帖子只有 m.title，
+        # 那串是「封面。正文开头…」拼在一起的，cover_of 会切出封面。
+        cover = (content.cover_title if content else "") or m.title or ""
         task = tasks.get(cid)
         dev = devices.get(task.device_id if task else m.device_id)
         acc = accounts.get(((task.device_id if task else m.device_id), m.platform))
@@ -191,6 +195,11 @@ def content_performance(session: Session, limit: int = 1000) -> list[dict]:
                 # 换了号，`upsert_account` 会就地覆盖 nickname（accounts.py），
                 # 历史数据就会挂到新号名下。要彻底解决得在发布时存一份快照，
                 # 那是另一件事；这里先把「今天这台机是谁」如实显示出来。
+                # 内容风格：实测唯一稳定更好的是「二选一」（摆出两个互斥选项
+                # 让人替他选），评论中位数是其余的 2.3 倍，而它只占产出的
+                # 10.5%。判据看封面那一句，见 services/content_taxonomy.py。
+                "content_type": classify(cover),
+                "tier": tier(cover),
                 "device_name": (dev.name if dev else None),
                 "account_nickname": (acc.nickname if acc else None),
                 "city": (acc.city if acc else (content.city if content else None)),
@@ -212,6 +221,74 @@ def content_performance(session: Session, limit: int = 1000) -> list[dict]:
 def _aware(moment: datetime) -> datetime:
     """库里存的是 naive UTC，减之前先补上时区，否则 TypeError。"""
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def type_summary(session: Session) -> dict:
+    """「哪种写法更好」的一句话结论 —— **在全量上算，不是在榜上算**。
+
+    ⚠ 不能拿 `content_performance` 的返回来算：那个函数是**先按互动排序再
+    截断**，拿到的永远是高分子集。在偏样本上算「二选一比其余好几倍」，
+    算出来的倍数是选样偏差不是效果。这个坑 2026-09-10 踩过一次
+    （中位数 11000 vs 真实 4886）。
+
+    平台分开算：抖音和小红书的评论量级差一个数量级，混在一起没有意义。
+    """
+    from app.services.content_taxonomy import TIER_BEST, tier
+
+    newest = (
+        select(
+            PostMetric.content_id.label("cid"),
+            func.max(PostMetric.captured_at).label("latest"),
+        )
+        .where(PostMetric.content_id.is_not(None))
+        .group_by(PostMetric.content_id)
+        .subquery()
+    )
+    snapshots = session.exec(
+        select(PostMetric).join(
+            newest,
+            (PostMetric.content_id == newest.c.cid)
+            & (PostMetric.captured_at == newest.c.latest),
+        )
+    ).all()
+    latest: dict[int, PostMetric] = {}
+    for m in snapshots:
+        latest.setdefault(m.content_id, m)
+    covers = {
+        c.id: (c.cover_title or "")
+        for c in session.exec(
+            select(ContentItem).where(ContentItem.id.in_(list(latest)))
+        ).all()
+    } if latest else {}
+
+    out: dict[str, dict] = {}
+    for platform in ("douyin", "xhs"):
+        best, rest = [], []
+        for cid, m in latest.items():
+            if m.platform != platform:
+                continue
+            cover = covers.get(cid) or m.title or ""
+            (best if tier(cover) == TIER_BEST else rest).append(m.comments or 0)
+        if len(best) < 5 or len(rest) < 5:
+            continue     # 样本太少，一句结论比没有结论更糟
+
+        def median(values: list[int]) -> float:
+            ordered = sorted(values)
+            mid = len(ordered) // 2
+            return (ordered[mid] if len(ordered) % 2
+                    else (ordered[mid - 1] + ordered[mid]) / 2)
+
+        m_best, m_rest = median(best), median(rest)
+        out[platform] = {
+            "best_n": len(best),
+            "rest_n": len(rest),
+            "best_share": round(len(best) / (len(best) + len(rest)) * 100),
+            # 取整：偶数条时中位数会是 97.5，而「评论 97.5 条」没有意义
+            "best_median_comments": round(m_best),
+            "rest_median_comments": round(m_rest),
+            "ratio": round(m_best / max(m_rest, 1), 1),
+        }
+    return out
 
 
 def top_posts_for_remix(session: Session, platform: str | None, limit: int = 10) -> list[dict]:

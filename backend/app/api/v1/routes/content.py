@@ -497,6 +497,18 @@ def delete_draft(draft_id: int, session: Session = Depends(get_session)):
     session.commit()
 
 
+@router.get("/performance/summary")
+def performance_summary(session: Session = Depends(get_session)):
+    """「哪种写法更好」的一句话结论。
+
+    ⚠ 单独一个接口，不塞进 /performance —— 那个接口是先排序再截断的，
+    前端拿它的返回自己算，算出来的是高分子集的倍数，不是全量的。
+    """
+    from app.services.metrics import type_summary
+
+    return type_summary(session)
+
+
 @router.get("/performance")
 def performance(
     limit: int = Query(1000, ge=1, le=5000),

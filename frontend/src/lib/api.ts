@@ -268,6 +268,10 @@ export interface PerformanceRow {
   captured_at: string;
   // 「谁发的、哪天发的」——榜上只有标题和数字时，看不出一条数字低是内容不行
   // 还是昨天刚发；也没法把爆款归到某个号头上。对不上发布任务的行是 null。
+  /** 八类之一（开口提问/两难选择/转述别人…），判据看封面那一句 */
+  content_type?: string | null;
+  /** 两档：「二选一」或「其余」。实测二选一的评论中位数是其余的 2.3 倍 */
+  tier?: string | null;
   device_name?: string | null;
   account_nickname?: string | null;
   city?: string | null;
@@ -276,6 +280,19 @@ export interface PerformanceRow {
 }
 export const contentPerformance = () =>
   api<PerformanceRow[]>("/content/performance");
+
+export interface TypeSummary {
+  best_n: number;
+  rest_n: number;
+  best_share: number;
+  best_median_comments: number;
+  rest_median_comments: number;
+  ratio: number;
+}
+/** 「哪种写法更好」的结论。**必须走这个接口**，别拿 contentPerformance 的
+ *  返回自己算 —— 那个接口先按互动排序再截断，算出来的是高分子集的倍数。 */
+export const performanceSummary = () =>
+  api<Record<string, TypeSummary>>("/content/performance/summary");
 
 // Ask every device to re-run 回采 (manual "更新数据" on 效果榜).
 export const refreshMetrics = () =>

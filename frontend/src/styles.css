@@ -4614,6 +4614,34 @@ main {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .perf-time { margin-left: auto; flex-shrink: 0; font-size: var(--fs-aux); color: var(--muted); }
+/* 榜头那一句结论。它是这个页面唯一「告诉你该做什么」的地方，
+   所以给一条 acid 左边线把它和上面的统计数字分开。 */
+.perf-insight {
+  margin: 0 0 var(--sp-5);
+  padding: var(--sp-4) var(--sp-5);
+  border-left: 3px solid var(--acid);
+  background: rgba(21, 168, 157, 0.06);
+  font-size: var(--fs-read); line-height: 1.6; color: var(--ink-soft);
+}
+.perf-insight b { color: var(--ink); }
+.perf-insight em {
+  display: block; margin-top: var(--sp-2);
+  font-style: normal; font-size: var(--fs-aux); color: var(--muted);
+}
+
+/* 内容风格标签。只有「二选一」那一档高亮 —— 它是唯一被实测证明稳定更好的
+   （评论中位数 2.3 倍），其余七类之间分不出差别，全部同一个弱样式，
+   免得看起来像七个有意义的档。 */
+.perf-kind { display: flex; }
+.perf-tier {
+  font-size: var(--fs-micro); font-weight: 600; letter-spacing: 0.02em;
+  padding: var(--sp-1) var(--sp-4); border-radius: var(--r-chip);
+  color: var(--muted); background: rgba(23, 22, 17, 0.05);
+}
+.perf-tier.is-best {
+  color: #0d5f57; background: rgba(21, 168, 157, 0.14);
+}
+
 /* 「谁发的 · 哪天发的」—— 榜上只有标题和数字时，一条数字低到底是内容不行
    还是昨天刚发，看不出来；爆款也归不到某个号头上。
    刻度全部沿用现成的（--fs-aux / --muted / --sp-3），不新造。 */
