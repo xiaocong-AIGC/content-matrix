@@ -15,6 +15,7 @@ from app.core.enums import (
     DeviceStatus,
     TaskStatus,
 )
+from app.services.city_policy import publishes, target_for, windows_for
 from app.models.entities import (
     ContentItem,
     Device,
@@ -219,7 +220,7 @@ def _retry_outlook(
 
     所以这句话必须现算，不能写死。四种情况说四种话。
     """
-    if account is None or not account.auto_publish:
+    if account is None or not publishes(session, account):
         return "这个号的自动发布没开着，要发的话去排期页手动排一条"
     if account.health != "normal":
         return "这个号现在是异常状态，处理好之前不会自动重发"
@@ -247,7 +248,7 @@ def _retry_outlook(
     wait = min(FAIL_BACKOFF_BASE * (2 ** max(streak - 1, 0)), FAIL_BACKOFF_MAX)
     retry_at = finished + wait
 
-    windows = publish_windows(session)
+    windows = windows_for(session, account)
     if not windows:
         return f"{_cn_hhmm(retry_at)} 前后会自动重发一条，不用管"
     # 退避结束之后，今天还剩不剩发布时段
@@ -285,13 +286,12 @@ def _due_by_plan(session: Session, account: "DeviceAccount", now: datetime) -> b
     用的是和群推送同一套 `schedule_windows`（用户明确说"发布也是"，所以不做两套），
     随机时刻可复现，所以这个判断反复调结果一致，不需要额外的状态。
     """
-    slots = publish_windows(session)
+    slots = windows_for(session, account)
     if not slots:
         return True
-    from app.services.notify_sweep import _expected_for, daily_target
     from app.services.schedule_windows import due_times
 
-    want = _expected_for(account, daily_target(session))
+    want = target_for(session, account)
     if want <= 0:
         return False
     due = due_times(
@@ -367,7 +367,7 @@ def maybe_generate_auto_task(session: Session, account: "DeviceAccount") -> None
     is on, the account is healthy and under its daily quota (and spaced out), take
     the next pooled content for that platform and queue it. The phone does one job
     at a time, so we still block on ANY active task on the device."""
-    if not account.auto_publish or account.health != "normal":
+    if not publishes(session, account) or account.health != "normal":
         return
     now = datetime.now(timezone.utc)
 
@@ -410,9 +410,7 @@ def maybe_generate_auto_task(session: Session, account: "DeviceAccount") -> None
     # 的 min(...)。线上 daily_quota=2、全局目标=1，一旦打开自动发布，引擎会按 2 篇发、
     # 首页按 1 篇算目标，第一天就是「今日已发 28 / 14」——又一次"同一件事两个口径"。
     # 因为自动发布从来没在生产上开过，这个洞一直没暴露。
-    from app.services.notify_sweep import _expected_for, daily_target
-
-    quota = _expected_for(account, daily_target(session))
+    quota = target_for(session, account)
     if count_today_published(session, account.device_id, account.platform) >= quota:
         return
 
@@ -1372,10 +1370,10 @@ def _quota_hint(session: Session, account, device_id: int | None, platform: str)
     if not device_id:
         return ""
     try:
-        from app.services.notify_sweep import _expected_for, daily_target
+        from app.services.notify_sweep import daily_target
 
         done = count_today_published(session, device_id, platform)
-        want = _expected_for(account, daily_target(session)) if account else daily_target(session)
+        want = target_for(session, account) if account else daily_target(session)
         if want and done >= want:
             return f"这个号今天的 {want} 篇发完了"
         return f"今天第 {done} 篇，还差 {max(want - done, 0)} 篇"

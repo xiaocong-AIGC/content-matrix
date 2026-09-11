@@ -60,6 +60,8 @@ class Device(SQLModel, table=True):
     douyin_nickname: str | None = Field(default=None, max_length=120)
     douyin_id: str | None = Field(default=None, max_length=64)
     city: str = Field(default="未分组", max_length=40, index=True)  # 城市矩阵分组
+    # ⚠ 死字段：账号搬到 DeviceAccount 之后没有任何代码再读它（生产上 37 台全是 0）。
+    # 真正生效的是 DeviceAccount.auto_publish，再往上是城市策略。别在这里改开关。
     auto_publish: bool = Field(default=False, index=True)
     daily_quota: int = Field(default=2, ge=0, le=50)
     health: str = Field(default="normal", index=True, max_length=16)
@@ -97,7 +99,13 @@ class DeviceAccount(SQLModel, table=True):
     nickname: str | None = Field(default=None, max_length=120)
     account_id: str | None = Field(default=None, max_length=64)  # 抖音号 / 小红书号
     city: str = Field(default="未分组", max_length=40, index=True)
+    # ⚠ 城市设了自动发布开关之后，这个老开关就不再起作用了 —— 它只在
+    # 「城市没设开关」时作兜底（见 services/city_policy.publishes）。
     auto_publish: bool = Field(default=False, index=True)
+    # 账号例外：None = 跟随城市（默认），"on" = 强制开，"off" = 强制关。
+    # 用来处理「全城开着，但这个号今天有问题先停一下」这种单点情况，
+    # 不用为了一个号去动整个城市。
+    publish_override: str | None = Field(default=None, max_length=8)
     daily_quota: int = Field(default=2, ge=0, le=50)
     health: str = Field(default="normal", index=True, max_length=16)
     health_message: str | None = Field(default=None, max_length=200)
@@ -207,6 +215,24 @@ class PromptVersion(SQLModel, table=True):
     # 人给的名字，比如「加了痛点开头那版」。可空，随时能补。
     label: str = Field(default="", max_length=120)
     created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class CityPolicy(SQLModel, table=True):
+    """一个城市的自动发布策略。每个字段都可以为空 —— **空 = 这一项跟随全局**。
+
+    所以一个城市可以只单独设时段，开关和篇数继续走全局。解析规则全在
+    `services/city_policy.py`，别在别处直读这张表。
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    city: str = Field(max_length=40, index=True, unique=True)
+    # None = 城市不管开关，各号按自己的老开关走；True/False = 全城统一
+    auto_publish: bool | None = Field(default=None)
+    # None = 用全局时段；"" = 这个城市明确不限时段；"10-11,14-15" = 城市自己的
+    windows: str | None = Field(default=None, max_length=200)
+    # None = 用全局篇数
+    daily_target: int | None = Field(default=None, ge=1, le=20)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class ConsoleToken(SQLModel, table=True):

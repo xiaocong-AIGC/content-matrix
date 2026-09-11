@@ -68,6 +68,8 @@ def serialize_account(acc: DeviceAccount) -> dict:
         "account_id": acc.account_id,
         "city": acc.city or "未分组",
         "auto_publish": acc.auto_publish,
+        # 账号例外：None = 跟随城市 / "on" / "off"
+        "publish_override": acc.publish_override,
         # 群推送和发布是两个独立开关：有的号适合发群、有的不适合
         "auto_broadcast": acc.auto_broadcast,
         "daily_quota": acc.daily_quota,

@@ -534,11 +534,15 @@ def test_auto_publish_matches_content_city():
     with TestClient(app) as client:
         device = _register_device(client, "sh-dev", "上海号")
         headers = {"X-Agent-Token": device["agent_token"]}
+        # ⚠ 先定城市、再开开关。城市策略上线之后，城市是主单位：一个号搬进一个
+        # 「全城关着」的城市，它就跟着城市不发了（这是运营要的语义）。反过来
+        # 在城市里点开这个号，会被翻译成「强制开」的账号例外，所以照样能发。
+        # 这条用例测的是「按城市取内容」，开关只是前置条件。
+        client.patch(f"/api/v1/devices/{device['id']}/profile", json={"city": "上海"})
         client.patch(
             f"/api/v1/devices/{device['id']}/auto-publish",
             json={"auto_publish": True},
         )
-        client.patch(f"/api/v1/devices/{device['id']}/profile", json={"city": "上海"})
 
         # A 杭州-only item, a 上海 item, and a 通用 item.
         client.post("/api/v1/content", json={"body": "杭州内容", "city": "杭州"})

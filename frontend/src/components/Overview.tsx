@@ -285,7 +285,10 @@ export function Overview({
             <i> / {todayTarget || "0"}</i>
           </strong>
           <small>
-            {inService.length} 个账号在发，每个账号 {roster.perHead} 篇
+            {inService.length} 个账号在发，
+            {new Set(inService.map((r) => r.account.target ?? roster.perHead)).size > 1
+              ? "各城市篇数不一样"
+              : `每个账号 ${inService[0]?.account.target ?? roster.perHead} 篇`}
           </small>
         </div>
         <div className="kpi">
@@ -412,7 +415,9 @@ export function Overview({
             // 卡片上比的是**今日目标**，不是 daily_quota（那是上限）。
             // 上面 KPI 刚说完「每号每天 1 篇」，卡片却写「1 / 2」，
             // 同一屏两个口径 —— 上限不是这里要回答的问题，它也不能在这页改。
-            const dq = roster.perHead;
+            // 每个号按它自己的篇数比 —— 城市可以单独设篇数，全站一个数已经不成立了。
+            // 后端算好下发（account.target），老后端没有这个字段就退回全局。
+            const dq = account.target ?? roster.perHead;
             const done = account.today_published ?? 0;
             const reached = done >= dq;
             const abnormalAcct = (account.health ?? "normal") !== "normal";

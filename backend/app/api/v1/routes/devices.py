@@ -1,6 +1,7 @@
 import json
 from datetime import timezone
 
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Header
 from sqlmodel import Session, func, select
 
@@ -22,6 +23,14 @@ from app.schemas.dto import (
     SchedulePostsRequest,
 )
 from app.core.admin_auth import require_admin, require_provision_key
+from app.services.city_policy import (
+    OVERRIDE_OFF,
+    OVERRIDE_ON,
+    policies_by_city,
+    policy_for,
+    publishes,
+    target_for,
+)
 from app.services.accounts import (
     accounts_for,
     get_account,
@@ -261,15 +270,30 @@ def serialize_device(session: Session, device: Device) -> dict:
         data["douyin_nickname"] = primary.nickname
         data["douyin_id"] = primary.account_id
         data["city"] = primary.city
-        data["auto_publish"] = primary.auto_publish
+        # 显示「实际发不发」，不是老开关 —— 城市开着时老开关可能是 false，
+        # 卡片上显示「关」而它其实在发，正是城市策略要消灭的那种不一致。
+        data["auto_publish"] = publishes(session, primary)
         data["daily_quota"] = primary.daily_quota
         data["health"] = primary.health
         data["health_message"] = primary.health_message
     data["today_published"] = count_today_published(session, device.id, "douyin")
     accounts = []
+    pmap = policies_by_city(session)
     for a in accts:
         ad = serialize_account(a)
         ad["today_published"] = count_today_published(session, device.id, a.platform)
+        # ⚠ `auto_publish` 这个字段名下发的是**实际发不发**，不是老开关原值。
+        # 桌面版 app.exe 编译的是老前端，它的列表、计数、「全部关闭」全靠这个
+        # 字段 —— 下发原值的话，城市开着的号在老界面上显示「不参与」，而
+        # 「全部关闭」只会去关原值为 true 的号，其余照发，界面却说已全部关闭。
+        # 账号总览「开着自动发布的号一定要看得见」那条判断也读这个字段。
+        effective = publishes(session, a, pmap)
+        ad["auto_publish"] = effective
+        ad["publishes"] = effective
+        ad["auto_publish_raw"] = a.auto_publish
+        # 这个号今天实际该发几篇，后端算好 —— 前端各页面自己算的话，
+        # 城市篇数、全局篇数、单号上限三者怎么组合，迟早有一页算错。
+        ad["target"] = target_for(session, a, pmap)
         accounts.append(ad)
     data["accounts"] = accounts
     return data
@@ -292,7 +316,14 @@ def set_profile(
         session.commit()
     if payload.city is not None:
         acc = get_account(session, device_id, payload.platform)
-        acc.city = payload.city.strip() or "未分组"
+        new_city = payload.city.strip() or "未分组"
+        # ⚠ 城市真的变了就清掉账号例外。例外是「相对原来那个城市」设的，搬到
+        # 新城市还带着它没有意义；而且搬进「未分组」之后，新页面的「单个号」
+        # 列表不显示未分组的号 —— 这条例外就没有任何界面能看见、能改了，
+        # 号会被一条看不见的「单独发」一直顶着往抖音发。
+        if new_city != acc.city:
+            acc.publish_override = None
+        acc.city = new_city
         acc.updated_at = utcnow()
         session.add(acc)
         session.commit()
@@ -311,8 +342,58 @@ def set_auto_publish(
         raise HTTPException(status_code=404, detail="设备不存在")
     acc = get_account(session, device_id, payload.platform)
     acc.auto_publish = payload.auto_publish
+    # ⚠ 城市设了开关之后，老开关就不起作用了（城市优先）。如果只写老开关，
+    # 这个按钮会**返回成功、但什么都没变** —— 静默失败。桌面版 app.exe 里
+    # 编译的还是老前端，运营点它就会撞上。
+    # 所以把这次点击翻译成账号例外：和城市不一致就设例外，一致就清掉例外
+    # （跟着城市走就好，不留一条冗余的例外）。老按钮的意图因此永远成立。
+    policy = policy_for(session, acc.city)
+    if policy is not None and policy.auto_publish is not None:
+        acc.publish_override = (
+            None if payload.auto_publish == policy.auto_publish
+            else (OVERRIDE_ON if payload.auto_publish else OVERRIDE_OFF)
+        )
+    else:
+        # 城市没设开关（未分组、折算之后才出现的新城市）时，老开关自己就是
+        # 最终决定。残留的例外必须清掉 —— 否则 publishes() 先看例外，老按钮
+        # 点关返回 200、号却还被一条「单独发」顶着一直发。
+        acc.publish_override = None
     if payload.daily_quota is not None:
         acc.daily_quota = payload.daily_quota
+    acc.updated_at = utcnow()
+    session.add(acc)
+    session.commit()
+    session.refresh(device)
+    return normalize_datetimes(serialize_device(session, device))
+
+
+class PublishOverrideIn(BaseModel):
+    """账号例外。null = 跟随城市（默认），"on" = 强制开，"off" = 强制关。"""
+
+    override: str | None = None
+    platform: str = "douyin"
+
+
+@router.patch("/{device_id}/publish-override", dependencies=[Depends(require_admin)])
+def set_publish_override(
+    device_id: int,
+    payload: PublishOverrideIn,
+    session: Session = Depends(get_session),
+):
+    """给单个号设例外，不用为了一个号去动整个城市。
+
+    典型用法：全城开着，这个号今天被限流了，先强制关它一天。
+    """
+    from app.services.city_policy import OVERRIDES
+
+    device = session.get(Device, device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="设备不存在")
+    value = (payload.override or "").strip() or None
+    if value is not None and value not in OVERRIDES:
+        raise HTTPException(status_code=400, detail="只能是 on、off 或留空（跟随城市）")
+    acc = get_account(session, device_id, payload.platform)
+    acc.publish_override = value
     acc.updated_at = utcnow()
     session.add(acc)
     session.commit()
@@ -335,15 +416,17 @@ def account_roster(session: Session = Depends(get_session)):
     目标就跳水，运营会看到数字分钟级晃动），也不能用 auto_publish
     （线上 37 个账号这个开关全是 false，用它算分母会得到 0）。
     """
-    from app.services.notify_sweep import _active_accounts, daily_target, _expected_for
+    from app.services.city_policy import policies_by_city, target_for
+    from app.services.notify_sweep import _active_accounts, daily_target
 
     active = _active_accounts(session)
     target = daily_target(session)
+    pmap = policies_by_city(session)
     return {
         "in_service_ids": [a.id for a in active],
         "in_service": len(active),
         "daily_target": target,
-        "today_target": sum(_expected_for(a, target) for a in active),
+        "today_target": sum(target_for(session, a, pmap) for a in active),
     }
 
 

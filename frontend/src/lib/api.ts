@@ -1,15 +1,16 @@
 import type {
+  BroadcastMessage,
+  BroadcastPreview,
+  BroadcastSchedule,
   ChatGroup,
+  CityPolicy,
   ContentItem,
   ContentStats,
   Device,
   ImageAsset,
-  BroadcastMessage,
-  BroadcastPreview,
-  BroadcastSchedule,
+  PublishTask,
   SupplyRunResult,
   SupplyState,
-  PublishTask,
   TaskCreate,
 } from "./types";
 
@@ -577,6 +578,28 @@ export const setDeviceAutoPublish = (
   api<Device>(`/devices/${id}/auto-publish`, {
     method: "PATCH",
     body: JSON.stringify({ auto_publish, daily_quota, platform }),
+  });
+/** 各城市的自动发布策略 + 实际生效值 */
+export const getPublishCities = () =>
+  api<{ cities: CityPolicy[] }>("/publish/cities");
+/** 只改传进去的字段；某项传 null = 改回跟随全局 */
+export const putPublishCity = (
+  city: string,
+  patch: Partial<Pick<CityPolicy, "auto_publish" | "windows" | "daily_target">>,
+) =>
+  api<{ cities: CityPolicy[] }>(`/publish/cities/${encodeURIComponent(city)}`, {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
+/** 账号例外：null = 跟随城市 */
+export const setPublishOverride = (
+  id: number,
+  override: "on" | "off" | null,
+  platform = "douyin",
+) =>
+  api<Device>(`/devices/${id}/publish-override`, {
+    method: "PATCH",
+    body: JSON.stringify({ override, platform }),
   });
 export const setDeviceProfile = (
   id: number,

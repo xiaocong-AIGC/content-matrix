@@ -96,9 +96,9 @@ def city_gaps(session: Session, include_ok: bool = False) -> list[dict]:
     生成用的还是只看有缺口的那份（`run_once` 用默认值），显示用这一份。
     """
     from app.services.notify_sweep import _accounts_by_city, NO_CITY
-    from app.services.notify_sweep import daily_target, _expected_for
+    from app.services.city_policy import policies_by_city, target_for
 
-    target = daily_target(session)
+    pmap = policies_by_city(session)
     days = min_days(session)
     buckets = _accounts_by_city(session)
 
@@ -114,7 +114,8 @@ def city_gaps(session: Session, include_ok: bool = False) -> list[dict]:
     for city, members in buckets.items():
         if city == NO_CITY:
             continue          # 没设城市的号只能吃通用池，不为它单独生成
-        per_day = sum(_expected_for(a, target) for a in members)
+        # 按城市自己的篇数算需求 —— 北京 1 篇、深圳 3 篇，备货量就该不一样
+        per_day = sum(target_for(session, a, pmap) for a in members)
         need = per_day * days
         have = stock.get(city, 0)
         if have < need or include_ok:

@@ -14,7 +14,16 @@ export interface DeviceAccount {
   nickname?: string | null;
   account_id?: string | null;
   city: string;
+  /** **实际发不发**（后端下发的就是实际值，老前端也读这个字段）。原值见 auto_publish_raw */
   auto_publish: boolean;
+  /** 老开关原值。城市设了开关之后它不起作用，界面上一般不该显示它 */
+  auto_publish_raw?: boolean;
+  /** 这个号今天实际该发几篇（城市篇数 / 全局篇数 / 单号上限，后端算好） */
+  target?: number;
+  /** 账号例外：null = 跟随城市，"on" = 强制开，"off" = 强制关 */
+  publish_override?: "on" | "off" | null;
+  /** 实际发不发（账号例外 → 城市 → 老开关，后端算好的） */
+  publishes?: boolean;
   /** 这个账号参不参与自动群推送。和 auto_publish 是两个独立开关 */
   auto_broadcast: boolean;
   daily_quota: number;
@@ -289,4 +298,26 @@ export interface BroadcastPreview {
     cancelled: number;
     missed: number;
   };
+}
+
+/** 一个城市的自动发布策略。三个设置项为 null = 这一项跟随全局。 */
+export interface CityPolicy {
+  city: string;
+  accounts: number;
+  publishing: number;
+  /** 设了例外的号有几个 */
+  exceptions: number;
+  auto_publish: boolean | null;
+  windows: string | null;
+  daily_target: number | null;
+  /** 实际生效的值 —— 界面显示这些 */
+  effective_windows: string;
+  effective_unrestricted: boolean;
+  effective_target: number;
+  /** 在发的号今天一共该发几篇（逐号算，含单号上限） */
+  publishing_target: number;
+  /** 设了「这个号单独发」的有几个 */
+  overrides_on: number;
+  /** 设了「这个号单独不发」的有几个 */
+  overrides_off: number;
 }

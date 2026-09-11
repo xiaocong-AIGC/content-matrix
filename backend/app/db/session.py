@@ -2,7 +2,7 @@ from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import event, inspect, text
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.core.config import get_settings
 
@@ -193,6 +193,12 @@ def create_db_and_tables() -> None:
                         "ADD COLUMN auto_broadcast BOOLEAN DEFAULT 0"
                     )
                 )
+        # 账号例外（见 CityPolicy）。默认 NULL = 跟随城市
+        if "publish_override" not in acc_columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE deviceaccount ADD COLUMN publish_override VARCHAR(8)")
+                )
 
     device_extra = {
         "douyin_nickname": "VARCHAR(120)",
@@ -232,6 +238,35 @@ def create_db_and_tables() -> None:
     )
 
     _backfill_device_accounts()
+    _seed_city_policies_once()
+
+
+CITY_POLICY_SEEDED = "city_policy:seeded"
+
+
+def _seed_city_policies_once() -> None:
+    """第一次上线城市策略时，把各号现在的开关折算成城市策略。**只跑一次。**
+
+    只给「全城意见一致」的城市建（全开或全关），建出来的策略和现状完全等价，
+    所以这一步前后没有任何一个号的发不发会变。
+
+    ⚠ 为什么要记一个「做过了」的标记，而不是每次启动都补：运营以后可能会
+    故意删掉某个城市的策略（想退回各号自己管），每次启动都补就等于跟他对着干；
+    而且一个新城市刚好全关时被自动建成「全城关」，之后有人去开某个号的老开关，
+    会发现不生效 —— 被一条他没建过的策略压着。
+    """
+    from app.models.entities import AppSetting
+    from app.services.city_policy import seed_from_accounts
+
+    with Session(engine) as s:
+        done = s.exec(
+            select(AppSetting).where(AppSetting.key == CITY_POLICY_SEEDED)
+        ).first()
+        if done:
+            return
+        made = seed_from_accounts(s)
+        s.add(AppSetting(key=CITY_POLICY_SEEDED, value=",".join(made) or "-"))
+        s.commit()
 
 
 def _backfill_device_accounts() -> None:

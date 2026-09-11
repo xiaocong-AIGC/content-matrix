@@ -6054,3 +6054,44 @@ main {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── 自动发布 · 按城市 ───────────────────────────────────────────────
+   一个城市一张：上面一行是「城市 · 几个号 · 几个在发 · 开关」，和账号行同形，
+   下面一行是这个城市自己的「每天几篇 / 什么时候发」。
+   刻度全部沿用现成的（--sp-* / --fs-* / --line / --r-card），不新造。 */
+.city-policy {
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--white);
+  overflow: hidden;
+}
+.city-policy + .city-policy { margin-top: var(--sp-4); }
+.city-policy > .kv-row { border-bottom: 1px solid var(--line); }
+.city-policy-rules {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) 1fr;
+  gap: var(--sp-5) var(--sp-6);
+  padding: var(--sp-5) var(--sp-6);
+  align-items: start;
+}
+.city-policy-rules > label,
+.city-policy-windows {
+  display: flex; flex-direction: column; gap: var(--sp-3);
+}
+.city-policy-rules > label > span,
+.city-policy-windows > span {
+  font-size: var(--fs-aux); color: var(--muted);
+}
+.city-policy-windows p {
+  margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-4);
+  font-size: var(--fs-read); color: var(--ink);
+}
+/* 「跟默认」是附注，比它挂着的时段弱一档 */
+.city-policy-windows em {
+  font-style: normal; font-size: var(--fs-aux); color: var(--muted);
+}
+.city-policy-actions { display: flex; gap: var(--sp-4); }
+
+@media (max-width: 900px) {
+  .city-policy-rules { grid-template-columns: 1fr; }
+}

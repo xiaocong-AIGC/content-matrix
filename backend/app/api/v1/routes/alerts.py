@@ -22,6 +22,7 @@ from app.core.enums import TaskStatus
 from app.core.serialization import normalize_datetimes
 from app.db.session import get_session
 from app.models.entities import Device, DeviceAccount, PublishTask, utcnow
+from app.services.city_policy import policies_by_city, publishes
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -56,6 +57,7 @@ def _aware(dt):
 @router.get("")
 def list_alerts(session: Session = Depends(get_session)):
     """当前活跃告警，按严重度(critical>warning>info)排序。"""
+    pmap = policies_by_city(session)
     now = utcnow()
     offline_after = get_settings().device_offline_seconds
     devices = session.exec(select(Device)).all()
@@ -94,7 +96,8 @@ def list_alerts(session: Session = Depends(get_session)):
             if down is None or down >= _A11Y_STUCK:
                 mins = int(down.total_seconds() // 60) if down else None
                 accs = accounts_by_device.get(d.id) or []
-                busy = [a for a in accs if a.auto_publish or a.auto_broadcast]
+                # 按「实际发不发」判断，不是老开关 —— 城市开着时老开关可能是 false
+                busy = [a for a in accs if publishes(session, a, pmap) or a.auto_broadcast]
                 howlong = f"已经 {mins} 分钟" if mins is not None else "有一段时间"
                 if busy:
                     who = "、".join(a.nickname or f"账号#{a.id}" for a in busy[:3])

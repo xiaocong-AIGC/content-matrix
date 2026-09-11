@@ -31,6 +31,7 @@ from app.models.entities import (
 )
 from app.services import notify, settings_store
 from app.services.notify import real_city
+from app.services.city_policy import policies_by_city, target_for
 
 _CN_TZ = timezone(timedelta(hours=8))
 
@@ -72,7 +73,11 @@ def daily_target(session: Session) -> int:
 
 
 def _expected_for(account: DeviceAccount, target: int) -> int:
-    """实际期望 = min(全局目标, 该号的上限)，这样单号调低上限依然生效。"""
+    """实际期望 = min(全局目标, 该号的上限)，这样单号调低上限依然生效。
+
+    ⚠ **别再用它**。它只认全局目标，城市单独设了篇数它不知道。
+    用 `services/city_policy.target_for(session, account)`。留着只为兼容。
+    """
     return min(target, account.daily_quota if account.daily_quota is not None else target)
 
 
@@ -178,6 +183,7 @@ def _scan_devices(session: Session, now: datetime) -> None:
 def _scan_content_pool(session: Session, now: datetime) -> None:
     """内容够不够分。按城市算，因为内容是按城市发的 —— 总数够不代表每个城市都够。"""
     target = daily_target(session)
+    pmap = policies_by_city(session)
     demand: dict[str, int] = {}
     homeless = []
     for account in _active_accounts(session):
@@ -187,7 +193,7 @@ def _scan_content_pool(session: Session, now: datetime) -> None:
             # 给它算库存只会凭空造出一个永远告急的假城市。单独提醒去补。
             homeless.append(account.nickname)
             continue
-        demand[city] = demand.get(city, 0) + _expected_for(account, target)
+        demand[city] = demand.get(city, 0) + target_for(session, account, pmap)
     today = f"{_cn_now():%Y%m%d}"
     if homeless:
         who = "、".join(homeless[:3]) + ("等" if len(homeless) > 3 else "")
@@ -724,6 +730,7 @@ def _daily_digest(session: Session, now: datetime) -> bool:
     by_city = _accounts_by_city(session)
     accounts = [a for group in by_city.values() for a in group]
     target = daily_target(session)
+    pmap = policies_by_city(session)
     published = {t.device_id for t in ok if t.device_id}
     done = len([a for a in accounts if a.device_id in published])
     silent = len(accounts) - done
@@ -772,7 +779,7 @@ def _daily_digest(session: Session, now: datetime) -> bool:
     # 一动不动 —— 看着像卡死，实际上是窗口取错了。
     _, week_start = _week_window(cn)
     week_done = _week_output(session, week_start, cn)["done"]
-    week_goal = sum(_expected_for(a, target) for a in accounts) * 7
+    week_goal = sum(target_for(session, a, pmap) for a in accounts) * 7
     lines.append(_c(
         f"本周已发 {week_done}/{week_goal} 篇（{week_start:%m-%d} 起）", "comment"
     ))
@@ -942,7 +949,8 @@ def _weekly_digest(session: Session, now: datetime) -> bool:
     by_city = _accounts_by_city(session)
     accounts = [a for group in by_city.values() for a in group]
     target = daily_target(session)
-    goal = sum(_expected_for(a, target) for a in accounts) * 7
+    pmap = policies_by_city(session)
+    goal = sum(target_for(session, a, pmap) for a in accounts) * 7
     rate = (this["done"] / goal * 100) if goal else 0.0
     prev_rate = (prev["done"] / goal * 100) if goal else 0.0
 
@@ -959,7 +967,7 @@ def _weekly_digest(session: Session, now: datetime) -> bool:
         members = by_city.get(city, [])
         if not members:
             continue
-        city_goal = sum(_expected_for(a, target) for a in members) * 7
+        city_goal = sum(target_for(session, a, pmap) for a in members) * 7
         got = sum(this["per_device"].get(a.device_id, 0) for a in members)
         was = sum(prev["per_device"].get(a.device_id, 0) for a in members)
         pct = (got / city_goal * 100) if city_goal else 0
@@ -975,7 +983,7 @@ def _weekly_digest(session: Session, now: datetime) -> bool:
         for account in by_city.get(city, []):
             got = this["per_device"].get(account.device_id, 0)
             was = prev["per_device"].get(account.device_id, 0)
-            want = _expected_for(account, target) * 7
+            want = target_for(session, account, pmap) * 7
             label = city if city != NO_CITY else "没设城市"
             if got == 0 and was == 0:
                 laggards.append((0, f"> {label}·{account.nickname} 0 篇，连续两周一条没发"))
